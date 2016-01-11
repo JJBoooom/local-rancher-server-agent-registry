@@ -1,0 +1,20 @@
+#conf
+
+# For example:8080. Do not input "8080"
+# Host tcp port for rancher server.
+# empty means random host port.
+# default:8080
+[SERVER]
+ip=
+port=
+
+#registry
+
+[REGISTRY]
+ip=
+port=
+name=
+store=
+
+[AGENT]
+ip=
