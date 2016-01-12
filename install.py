@@ -191,8 +191,41 @@ class  Remote_Registry(Registry):
         env.password = self.password
         docker_conf = '/etc/sysconfig/docker'
         with quiet(), settings(warn_only=True):
-            command = 'grep -e "^"'  
-        
+            command = 'grep -e "^\s*#\+INSECURE_REGISTRY" %s'%(docker_conf)
+            result = run(command)
+            if not result.failed:
+                content = 'INREGISTRY=\'--insecure-registry %s:%s'%(self.ip, self.port)
+                command = 'sed -i "s/^\s*#\+INSECURE_REGISTRY=.*/%s/g" %s' %(content, docker_conf)
+                result = run(command)
+                if not result.failed
+                    return False
+                else:
+                    return True
+            else:
+                return False
+
+            command = 'grep -e "^\s*INSECURE_REGISTRY=" %s'%(docker_conf)
+            result = run(command)
+            if not result.failed:
+                content = result.stdout.strip().rstrip('\'')+' --insecure-registry %s:%s' % (self.ip, self.port)
+                command = 'sed -i "s/^\s*INSECURE_REGISTRY=.*/%s/g %s' %(content, docker_conf)
+                result = run(command)
+                if restul.failed:
+                    return False
+                else:
+                    return True
+            else:
+                return False
+
+            content = 'INSECURE_REGISTRY= \'--insecure-registry %s:%s\'' %(self.ip, self.port)
+            command = 'cat %s >> %s' % (content, docker_conf)
+            result = run(command)
+            if not result.failed:
+                return True
+            else:
+                return False
+             
+
     
     def load_images(self, zipped_path, images_file):
         env.host_string = "%s:%s"%(self.ip ,22) 
