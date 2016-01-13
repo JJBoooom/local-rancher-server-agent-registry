@@ -1,7 +1,5 @@
 #coding=utf-8
 #!/usr/bin/env python
-
-
 import subprocess
 import sys
 import os
@@ -22,7 +20,6 @@ class MyException(Exception):
     pass
 
 class Registry(object):
-    
     def __init__(self, port='5000', name='MyPrivateRegistry', store='/var/lib/MyPrivateRegistry'):
         self.port = port
         self.name = name
@@ -78,9 +75,9 @@ class Registry(object):
                 return False
             
             with settings(warn_only=True):
-                result = local('gunzip %s' %(temp+"/"+os.path.basename(zipped_path)))
+                result = local('tar xvzf %s' %(temp+"/"+os.path.basename(zipped_path)))
             if result.failed:
-                log.error('gunzip fail')
+                log.error('untar fail')
                 return False
 
             onlyfiles = [os.path.join(temp,f) for f in os.listdir(temp) if os.path.isfile(os.path.join(temp, f))]
@@ -122,7 +119,45 @@ class Registry(object):
             log.error('run registry fail')
             return False
 
-        
+    def push_private_registry(self, images_file):
+        if not os.path.exists(images_file):
+            log.error('image list file does not exist')
+            return False
+
+        try:
+            f = open(images_file, 'r')
+            try:
+                with settings(warn_only=True):
+                    for eachline in f:
+                        image = eachline.replace('docker.io','%s:%s'%(self.ip, self.port))
+                        log.debug('image:%s'%image)
+                        command = 'docker tag %s %s'%(eachline, image)
+                        result = local(command)
+                        if result.failed:
+                            log.error('docker tag fail')
+                            return False
+                        command = 'docker push %s'%(image)
+                        result = local(command)
+                        if result.failed:
+                            log.error('docker push fail')
+                            return False
+                        return True
+            except Exception, e:
+                log.error('read file failed:' + str(e))
+                return False
+            finally:
+                f.close()
+        except Exception, e:
+            log.error('open %s fail:'%(images_file)+str(e))
+        return False
+
+    def set_system_firewalld_selinux(self):
+        with settings(warn_only=True):
+            command = 'systemctl stop firewalld'
+            local(command)
+            
+            command = 'setenforce 0'
+            local(command)
               
 class  Remote_Registry(Registry):
     def __init__(self, ip, port='5000', name='MyPrivateRegistry', store='/var/lib/MyPrivateRegistry'):
@@ -140,8 +175,6 @@ class  Remote_Registry(Registry):
         
     def validate(self):
         return self.ip != get_hostip() and self.password != None
-
-    
     
     def check_env(self):
         env.host_string = "%s:%s"%(self.ip ,22) 
@@ -191,42 +224,36 @@ class  Remote_Registry(Registry):
         env.password = self.password
         docker_conf = '/etc/sysconfig/docker'
         with quiet(), settings(warn_only=True):
-            command = 'grep -e "^\s*#\+INSECURE_REGISTRY" %s'%(docker_conf)
+            command = 'grep -e "^\s*#\+\s*INSECURE_REGISTRY" %s'%(docker_conf)
             result = run(command)
             if not result.failed:
-                content = 'INREGISTRY=\'--insecure-registry %s:%s'%(self.ip, self.port)
-                command = 'sed -i "s/^\s*#\+INSECURE_REGISTRY=.*/%s/g" %s' %(content, docker_conf)
+                content = 'INSECURE_REGISTRY=\'--insecure-registry %s:%s\''%(self.ip, self.port)
+                command = 'sed -i "s/^\s*#\+\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
                 result = run(command)
-                if not result.failed
+                if not result.failed:
                     return False
                 else:
                     return True
-            else:
-                return False
 
-            command = 'grep -e "^\s*INSECURE_REGISTRY=" %s'%(docker_conf)
+            command = 'grep -e "^\s*INSECURE_REGISTRY" %s'%(docker_conf)
             result = run(command)
             if not result.failed:
-                content = result.stdout.strip().rstrip('\'')+' --insecure-registry %s:%s' % (self.ip, self.port)
-                command = 'sed -i "s/^\s*INSECURE_REGISTRY=.*/%s/g %s' %(content, docker_conf)
+                content = result.stdout.strip().rstrip('\'')+' --insecure-registry %s:%s\'' % (self.ip, self.port)
+                command = 'sed -i "s/^\s*INSECURE_REGISTRY.*/%s/g %s' %(content, docker_conf)
                 result = run(command)
                 if restul.failed:
                     return False
                 else:
                     return True
-            else:
-                return False
 
             content = 'INSECURE_REGISTRY= \'--insecure-registry %s:%s\'' %(self.ip, self.port)
-            command = 'cat %s >> %s' % (content, docker_conf)
+            command = 'echo "%s" >> %s' % (content, docker_conf)
             result = run(command)
             if not result.failed:
                 return True
             else:
                 return False
              
-
-    
     def load_images(self, zipped_path, images_file):
         env.host_string = "%s:%s"%(self.ip ,22) 
         env.password = self.password
@@ -255,20 +282,26 @@ class  Remote_Registry(Registry):
                     log.error('%s:moving zipped to temp dir fail' % (self.ip))
                     raise MyException
 
-                command = 'gunzip %s/%s' % (tempdir,os.path.basename(zipped_path))
-                result = run(command)
-                if result.failed:
-                    log.error("%s:gunzip fail"%(self.ip))
-                    raise MyException
+                command = 'tar xvzf %s' % (os.path.join(tempdir,os.path.basename(zipped_path)))
+                log.info('command:'+command)
+                with cd(tempdir):
+                    result = run(command)
 
-                command = 'ls %s' % (tempdir)
+                    if result.failed:
+                        log.error("%s:untar fail"%(self.ip))
+                        raise MyException
+
+                zipped = (os.path.basename(zipped_path)).split('.')[0]
+                temp_zipped = os.path.join(tempdir, zipped)
+                command = 'ls %s' % (os.path.join(tempdir, zipped))
                 result = run(command)
                 if result.failed:
-                    log.error("%s:list file faile")%(self.ip)
+                    log.error("%s:list file faile"%(self.ip))
                     raise MyException
                 else:
+                    command = 'ls'
                     for tfile in result.stdout.split():
-                        command = 'docker load --input %s/%s'%(tempdir, tfile)
+                        command = 'docker load --input %s/%s'%(temp_zipped, tfile)
                         result = run(command)
                         if result.failed:
                             log.error('%s:load %s fail'%(self.ip, tfile))
@@ -279,6 +312,240 @@ class  Remote_Registry(Registry):
                 command = 'rm -rf %s'%(tempdir)
                 result = run(command)
                 sys.exit(1)
+
+
+    def push_private_registry(self, images_file):
+        if not os.path.exists(images_file):
+            log.error('image list file does not exist')
+            return False
+
+        try:
+            f = open(images_file, 'r')
+            try:
+                with settings(warn_only=True):
+                    for eachline in f:
+                        li = eachline.strip()
+                        if li.startswith('#') or not li:
+                            continue
+
+                        image = li.replace('docker.io','%s:%s'%(self.ip, self.port))
+                        log.error('image:'+image)
+                        command = 'docker tag %s %s'%(li, image)
+                        result = run(command)
+                        if result.failed:
+                            log.error('docker tag fail')
+                            return False
+                        command = 'docker push %s'%(image)
+                        result = run(command)
+                        if result.failed:
+                            log.error('docker push fail')
+                            return False
+                return True
+            except Exception, e:
+                log.error('read file failed:' + str(e))
+                return False
+            finally:
+                f.close()
+        except Exception, e:
+            log.error('open %s fail:'%(images_file)+str(e))
+
+    def set_system_firewalld_selinux(self):
+        with settings(warn_only=True):
+            command = 'systemctl stop firewalld'
+            run(command)
+
+            command = 'setenforce 0'
+            run(command)
+
+class FabricSupport:
+    def __init__(self):
+        pass
+    def run(self, ip, port, password ,command):
+        env.host_string = '%s:%s' %(ip, port)
+        env.password =  password
+        with settings(warn_only=True):
+            return run(command, quiet=True)
+    def local_run(self, command):
+        with settings(warn_only=True):
+            return local(command)
+     
+
+
+class Lserver(object):
+    def __init__(self, registry_ip, registry_port, port='8080'):
+        self.registry_ip = registry_ip
+        self.registry_port = registry_port
+        self.port = port
+        self.ip = get_hostip()
+
+    def validate(self):
+        return self.registry_ip != None and self.registry_port != None and self.ip != None and self.port != None
+
+    def run_server(self):
+        with settings(warn_only=True):
+            command = 'docker run -d --restart=always -p %s:8080 %s:%s/rancher/server' % (self.port, self.registry_ip, self.registry_port)
+            result = local(command)
+            if result.failed:
+                log.error('run rancher server fail')
+                sys.exit(1)
+
+        
+class Rserver(object):
+    def __init__(self, registry_ip, registry_port, password, ip, port='8080'):
+        self.registry_ip = registry_ip
+        self.registry_port = registry_port
+        self.port = port
+        self.ip = ip
+        self.password = password
+
+    def validate(self):
+        return self.registry_ip != None and self.registry_port != None and self.ip != None and self.port != None 
+
+    def add_registry(self):
+        env.host_string = "%s:%s"%(self.ip ,22) 
+        env.password = self.password
+        docker_conf = '/etc/sysconfig/docker'
+        with settings(warn_only=True):
+            command = 'grep -e "^\s*#\+\s*INSECURE_REGISTRY" %s'%(docker_conf)
+            result = run(command)
+            if not result.failed:
+                content = 'INSECURE_REGISTRY=\'--insecure-registry %s:%s\''%(self.registry_ip, self.registry_port)
+                command = 'sed -i "s/^\s*#\+\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
+                log.info('command1:'+command)
+                result = run(command)
+                if not result.failed:
+                    return False
+                else:
+                    return True
+
+            command = 'grep -e "^\s*INSECURE_REGISTRY" %s'%(docker_conf)
+            result = run(command)
+            if not result.failed:
+                content = result.stdout.strip().rstrip('\'')+' --insecure-registry %s:%s\'' % (self.registry_ip, self.registry_port)
+                command = 'sed -i "s/^\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
+                log.info('command2:'+command)
+                result = run(command)
+                if result.failed:
+                    return False
+                else:
+                    return True
+
+            content = 'INSECURE_REGISTRY= \'--insecure-registry %s:%s\'' %(self.registry_ip, self.registry_port)
+            command = 'echo \"%s\" >> %s' % (content, docker_conf)
+            log.info('command3:'+command)
+            result = run(command)
+            if not result.failed:
+                return True
+            else:
+                return False
+
+    def run_server(self):
+      #  if not self.add_registry():
+      #      log.error('add Registry fail')
+      #      sys.exit(1)
+      #  else:
+      #      log.info('add Registry')
+         
+        env.host_string = '%s:22' %(self.ip)
+        env.password =  self.password
+        with settings(warn_only=True):
+            command = 'docker pull %s:%s/rancher/server'%(self.registry_ip, self.registry_port)
+            result = run(command)
+            if result.failed:
+                log.error('pull image fail')
+                sys.exit(1)
+            command = 'docker run -d --restart=always -p %s:8080 %s:%s/rancher/server' % (self.port, self.registry_ip, self.registry_port)
+            log.info('command:'+command)
+            result = run(command)
+            if result.failed:
+                log.error('run rancher server fail')
+                sys.exit(1)
+
+    def set_system_firewalld_selinux(self):
+        with settings(warn_only=True):
+            command = 'systemctl stop firewalld'
+            run(command)
+
+            command = 'setenforce 0'
+            run(command)
+
+        
+    def restart_docker(self):
+        with settings(warn_only=True):
+            command = 'systemctl restart docker'
+            result = run(command)
+            if result.failed:
+                sys.exit(1)
+
+class Ragent(object):
+    def __init__(self, registry_ip, registry_port, ip,password,command)
+        self.registry_ip = registry_ip
+        self.registry_port = registry_port
+        self.ip = ip
+        self.command = command
+        self.password = password
+
+    def add_registry(self):
+        env.host_string = "%s:%s"%(self.ip ,22) 
+        env.password = self.password
+        docker_conf = '/etc/sysconfig/docker'
+        with settings(warn_only=True):
+            command = 'grep -e "^\s*#\+\s*INSECURE_REGISTRY" %s'%(docker_conf)
+            result = run(command)
+            if not result.failed:
+                content = 'INSECURE_REGISTRY=\'--insecure-registry %s:%s\''%(self.registry_ip, self.registry_port)
+                command = 'sed -i "s/^\s*#\+\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
+                log.info('command1:'+command)
+                result = run(command)
+                if not result.failed:
+                    return False
+                else:
+                    return True
+
+            command = 'grep -e "^\s*INSECURE_REGISTRY" %s'%(docker_conf)
+            result = run(command)
+            if not result.failed:
+                content = result.stdout.strip().rstrip('\'')+' --insecure-registry %s:%s\'' % (self.registry_ip, self.registry_port)
+                command = 'sed -i "s/^\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
+                log.info('command2:'+command)
+                result = run(command)
+                if result.failed:
+                    return False
+                else:
+                    return True
+
+            content = 'INSECURE_REGISTRY= \'--insecure-registry %s:%s\'' %(self.registry_ip, self.registry_port)
+            command = 'echo \"%s\" >> %s' % (content, docker_conf)
+            log.info('command3:'+command)
+            result = run(command)
+            if not result.failed:
+                return True
+            else:
+                return False
+
+    def restart_docker(self):
+        env.host_string = '%s:22' %(self.ip)
+        env.password =  self.password
+        with settings(warn_only=True):
+            command = 'systemctl restart docker'
+            result = run(command)
+            if result.failed:
+                sys.exit(1)
+
+    def run_agent(self):
+        env.host_string = '%s:22' %(self.ip)
+        env.password =  self.password
+        with settings(warn_only=True):
+            command = 'docker pull %s:%s/rancher/agent:v0.8.2'
+            result = run(command)
+            if result.failed():
+                sys.exit(1)
+            
+            result = run(self.command) 
+            if result.failed:
+                log.error('run agent fail')
+                sys.exit(1)
+        
            
 def add_insecure_registry(docker_conf, ip, port):
     content = '--insecure-registry %s:%s' % (ip, port)
@@ -378,9 +645,12 @@ def parse_conf(config_path):
     return conf_db
 
 
+def list_registry():
+    command = 'docker images | awk \'{print $1":"$2}\''
 
-def push_private_registry():
-    pass
+#获取所有镜像
+def list_container(image):
+    command = 'docker ps | awk \'{print $2}\''
 
 def install_registry():
     check_docker_running()
@@ -395,7 +665,7 @@ def install_registry():
 def xtmain():
     script_dir_path =os.path.abspath(os.path.dirname(sys.argv[0]))
     config_path = script_dir_path+'/conf'
-    zipped_path = script_dir_path+'/image_zipped.tar.gz'
+    zipped_path = script_dir_path+'/images_zipped.tar.gz'
     images_file = script_dir_path+'/imagelists'
     log.info("loading config from "+config_path)
 
@@ -436,19 +706,32 @@ def xtmain():
 
     #            install_registry()
 
+ 
+    
 
 def main():
     script_dir_path =os.path.abspath(os.path.dirname(sys.argv[0]))
-    zipped_path = script_dir_path+'/image_zipped.tar.gz'
+    zipped_path = script_dir_path+'/images_zipped.tar.gz'
     images_file = script_dir_path+'/imagelists'
     #xtmain()
+
     #add_insecure_registry('192.168.4.2', '5050')
+    test='''
     rg = Remote_Registry('192.168.4.30')
     rg.display()
     rg.check_env()
     #rg.run_registry()
     rg.load_images(zipped_path, images_file)
+    rg.set_system_firewalld_selinux()
     rg.run_registry()
+    rg.add_registry()
+    rg.push_private_registry(images_file)
+    '''
+    rs = Rserver('192.168.4.30', '5000', 'Cloudsoar123','192.168.4.29', port='8080')
+    rs.add_registry()
+    rs.restart_docker()
+    rs.run_server()
+
 
 if __name__ == '__main__':
     main()

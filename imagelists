@@ -2,5 +2,4 @@
 
 docker.io/rancher/server:latest
 docker.io/rancher/agent:v0.8.2
-docker.io/rancher/agent-instance:v0.6.0
 docker.io/registry:2
