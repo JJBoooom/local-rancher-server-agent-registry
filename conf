@@ -1,20 +1,35 @@
 #conf
 
-# For example:8080. Do not input "8080"
-# Host tcp port for rancher server.
-# empty means random host port.
-# default:8080
+# For example:8080.
+# port: [default]8080
 [SERVER]
-ip=
-port=
+ip=192.168.4.29
+port=8080
+password=Cloudsoar123
 
 #registry
-
+#port: registry host port, default=5000
+#name: registry name.Can be empty,default=MyPrivateRegistry.
+#store: volume shared between host and registry container.Can be empty, default to '/var/lib/MyPrivateRegistry'
+#password: password of registry host. If empty, you need to input when script runs.
 [REGISTRY]
-ip=
+ip= 192.168.4.30
 port=
 name=
 store=
+password=Cloudsoar123
 
 [AGENT]
-ip=
+
+rancher-server-command= 'docker run -d --privileged -v /var/run/docker.sock:/var/run/docker.sock 192.168.4.30:5000/rancher/agent:v0.8.2 http://192.168.4.29:8080/v1/scripts/0AD7C1E886B07BD2EE92:1452769200000:zFmabc6GPpSGARUr4nOjupZitm8'
+
+ip1= 192.168.4.201
+password1= Cloudsoar123
+
+ip2= 192.168.4.202
+password2= Cloudsoar123
+
+
+
+
+
