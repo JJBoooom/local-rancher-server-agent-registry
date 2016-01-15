@@ -311,7 +311,6 @@ class RancherServer(object):
         self.ip = ip
         self.password = password
 
-
         if self.ip == get_hostip():
             self.local = True
         else:
@@ -343,6 +342,7 @@ class RancherServer(object):
                 return False
             else:
             #purpose: check password. need accurate method
+            #paramiko will be better way
                 command = 'ls'
                 result = self.command_run(command)
                 if result.failed:  
@@ -392,6 +392,7 @@ class RancherServer(object):
                     raise MyException
                 else:
                     return
+
             content = 'INSECURE_REGISTRY= \'--insecure-registry %s:%s\'' %(self.registry_ip, self.registry_port)
             command = 'echo \"%s\" >> %s' % (content, docker_conf)
             result = self.command_run(command)
@@ -417,7 +418,6 @@ class RancherServer(object):
             sys.exit(1)
 
     def set_system_firewalld_selinux(self):
-
         command = 'systemctl stop firewalld'
         self.command_run(command)
 
@@ -425,7 +425,6 @@ class RancherServer(object):
         self.command_run(command)
 
     def restart_docker(self):
-
         command = 'systemctl restart docker'
         result = self.command_run(command)
         if result.failed:
@@ -560,12 +559,23 @@ class RancherAgent(object):
             sys.exit(1)
 
     def run_agent(self):
-        command = 'docker pull %s:%s/rancher/agent:v0.8.2'
+        command = 'docker pull %s:%s/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
         result = self.command_run(command)
-        if result.failed():
+        if result.failed:
             sys.exit(1)
-            
-        result = self.command_run(self.add_host_command) 
+    
+        command = 'docker tag %s:%s/rancher/agent:v0.8.2 docker.io/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
+        result = self.command_run(command)
+        if result.failed:
+            sys.exit(1)
+
+        command = 'docker tag docker.io/rancher/agent:v0.8.2 docker.io/rancher/agent:latest'
+        result = self.command_run(command)
+        if result.failed:
+            sys.exit(1)
+                
+        log.error('Agent:command'+self.command)
+        result = self.command_run(self.command) 
         if result.failed:
             log.error('run agent fail')
             sys.exit(1)
@@ -637,6 +647,17 @@ def get_hostip():
         log.error("Can not get host ip:"+str(e))
         sys.exit(1)
 
+# delete the '' or "" of a string
+def clean_str(var):
+    del_commas = ['\'', '\"']
+
+    if not var:
+        return var
+    for i in del_commas:
+        if var.startswith(i) and var.endswith(i):
+            return var.lstrip(i).rstrip(i)
+    return var
+
 
 def parse_conf(config_path):
     if os.path.exists(config_path):
@@ -655,17 +676,18 @@ def parse_conf(config_path):
         log.error(e)
         sys.exit(1)
 
+
     section = 'REGISTRY'
-    conf_db['registry_ip'] = config.get(section,'ip')
-    conf_db['registry_port'] = config.get(section,'port')
-    conf_db['registry_name'] = config.get(section,'name')
-    conf_db['registry_store'] = config.get(section,'store')
-    conf_db['registry_password'] = config.get(section, 'password')
+    conf_db['registry_ip'] = clean_str(config.get(section,'ip'))
+    conf_db['registry_port'] = clean_str(config.get(section,'port'))
+    conf_db['registry_name'] = clean_str(config.get(section,'name'))
+    conf_db['registry_store'] = clean_str(config.get(section,'store'))
+    conf_db['registry_password'] = clean_str(config.get(section, 'password'))
 
     section = 'SERVER'
-    conf_db['server_ip'] = config.get(section,'ip')
-    conf_db['server_port'] = config.get(section, 'port')
-    conf_db['server_password'] = config.get(section, 'password')
+    conf_db['server_ip'] = clean_str(config.get(section,'ip'))
+    conf_db['server_port'] = clean_str(config.get(section, 'port'))
+    conf_db['server_password'] = clean_str(config.get(section, 'password'))
 
     if not conf_db['registry_name']:  
         conf_db['registry_name'] = 'MyPrivateRegistry'
@@ -704,20 +726,20 @@ def parse_agent_conf(config_path):
             if not config.get(section, options):
                 log.error('Must set rancher-server-command option, get it from rancher server web page > ADD HOST PAGE')
                 sys.exit(1)
-            agents_conf[options]=config.get(section, options)
+            agents_conf[options]= clean_str(config.get(section, options))
         if options.startswith('ip'):
        #skip duplicate ips
        #Note: ConfigParser will auto filter duplicate option, and choose the last option's value
             #if ips.has_key(options):
             #   print 'skip duplicate option:'+options
             #    continue
-            ipaddr = config.get(section, options)
+            ipaddr = clean_str(config.get(section, options))
             if ipaddr:
                 ips[options] = ipaddr
             else:
                 log.info('skip EMPTY option:%s'%(options))
         if options.startswith('password'):
-            password = config.get(section, options)
+            password = clean_str(config.get(section, options))
             if password:
                 pws[options] = password
     for ipkey in ips.keys():
@@ -765,8 +787,8 @@ def setup_agent(conf_db, agents_conf, ip):
         return
     if not agent.check_registry():
         return
-    if agent.check_running():
-        return
+    #if agent.check_running():
+    #    return
     agent.add_registry()
     agent.restart_docker()
     agent.run_agent()
@@ -835,7 +857,7 @@ def main():
             break
         else:
             log.info("Rancher Server installing...")
-    #def __new__(cls, registry_ip, registry_port, registry_password, ip, port, password):
+
             rs = RancherServer(
                 registry_ip=conf_db['registry_ip'],
                 registry_port=conf_db['registry_port'], 
@@ -870,18 +892,24 @@ def main():
     
         agents_conf = parse_agent_conf(config_path)
 
-        for i in agents_conf.keys():
-            print i+":"+agents_conf[i]
-
+        threads = []
         for ip in agents_conf.keys():
             if ip != 'rancher-server-command':
                 t = threading.Thread(target=setup_agent, args=(conf_db, agents_conf, ip, ))
                 t.start()
+                threads.append(t)
 
+        for t in threads:
+            log.error("-----------------------------------")
+            t.join()
+        log.info('Adding agent finish')
         break
 
-
+#class Container(object):
+#    def __new__(cls, image, port, password, name, store):
 #docker run -d -e ENV_DOCKER_REGISTRY_HOST=192.168.4.32 -e ENV_DOCKER_REGISTRY_PORT=5000 -e ENV_MODE_BROWSE_ONLY=false -p 9988:80 konradkleine/docker-registry-frontend:v2
         
 if __name__ == '__main__':
     main()
+
+   
