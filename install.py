@@ -14,7 +14,7 @@ from docker import Client
 from fabric.api import *
 import threading
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - <%(levelname)s> - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - <%(levelname)s> - %(message)s')
 log = logging.getLogger(__name__)
 
 class MyException(Exception):
@@ -41,7 +41,7 @@ class FabricSupport:
 
     def move_file(self,localflag,ip, password, src, dest):
         if localflag:
-            return local('cp %s %s'%(src, dest))
+            return local('cp -rf %s %s'%(src, dest))
         else:
             env.host_string = "%s:%s"%(ip ,22) 
             env.password = password
@@ -67,7 +67,7 @@ class Registry(object):
             self.name = 'MyPrivateRegistry'
         if not self.store:
             self.store = '/var/lib/MyPrivateRegistry'
-            self.registry='registry:2'
+        self.image='registry:2'
 
         if self.ip == get_hostip():
             self.local = True
@@ -83,7 +83,8 @@ class Registry(object):
             self.name and self.store and self.password)
 
     def check_running(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
+        command = 'docker ps | awk \'{print $2}\' | grep %s'%(self.image)
+        log.debug(command)
         result = self.command_run(command)
         if result.failed:
             return False
@@ -92,17 +93,20 @@ class Registry(object):
 
     def command_run(self, command):
         if self.local:
-            with settings(warn_only=True):
+            with settings(
+                hide('stdout','stderr'),
+                warn_only=True
+            ):
                 return local(command)
         else:
-            env.host_string = "%s:%s"%(self.ip ,22) 
-            env.password = self.password
             with settings(warn_only=True):
+                env.host_string = "%s:%s"%(self.ip ,22) 
+                env.password = self.password
                 return run(command)
 
     def move_file(self, src, dest):
         if self.local:
-            return local('cp %s %s'%(src, dest))
+            return local('cp -rf %s %s'%(src, dest))
         else:
             env.host_string = "%s:%s"%(self.ip ,22) 
             env.password = self.password
@@ -142,17 +146,20 @@ class Registry(object):
                 log.error('docker not intalled')
                 raise MyException
             result = self.command_run('docker version')
-            if result.failed and confirm('docker daemon isn\'t running, Try to start it?'):
-                result = self.command_run('systemctl start docker') 
-                if result.failed:
-                    log.error('Can\'t start docker daemon')
-                    raise MyException
+            if result.failed:
+                if confirm('docker daemon isn\'t running, Try to start it?'):
+                    result = self.command_run('systemctl start docker') 
+                    if result.failed:
+                        log.error('Can\'t start docker daemon')
+                        raise MyException
                 else:
                     log.error('cancel to start docker daemon')
                     raise MyException
-            log.info('check docker enviroment success')
+            else:
+                log.info('check docker enviroment success')
+                return True
         except MyException:
-            sys.exit(1) 
+            return False
 
     def load_images(self, zipped_path, images_file):
         if not zipped_path or not images_file:
@@ -161,6 +168,50 @@ class Registry(object):
         if not os.path.exists(zipped_path) or not os.path.exists(images_file):
             log.error('missing images zipped')
             sys.exit(1)
+
+        log.debug('start to load images..')
+        command = 'docker images | awk \'{print $1":"$2}\''
+        result = self.command_run(command)
+        if result.failed:
+            log.error('get images failed')
+            sys.exit(1)
+        else:
+            dockerimages = result.stdout.strip().split('\r\n')
+            for i in dockerimages:
+                print i
+            try:
+                dockerimages.remove("REPOSITORY:TAG")
+            except ValueError:
+                pass
+            log.debug('..................')
+            for i in dockerimages:
+                print i
+            
+           
+            if dockerimages: 
+                log.debug('check if all image exist in local')
+                try:
+                    f = open(images_file, 'r')
+                    all_match_flag = True
+                    for eachline in f:
+                        li = eachline.strip()
+                        match_flag = False
+                        for j in dockerimages:
+                            if j == li:
+                                match_flag = True
+                                all_match_flag = False
+                                break
+                        if match_flag:
+                            continue
+                        log.info('all image exists, skip loading images') 
+                        return
+                except Exception, e:
+                    log.error('open %s fail:'%(images_file)+str(e))
+                    sys.exit(1)
+                finally:
+                    f.close()
+            else:
+                log.debug('missing  image,start to load image')
 
         try:
             tempdir = ''
@@ -260,27 +311,45 @@ class Registry(object):
             log.error('image list file does not exist')
             sys.exit(1)
 
+        command = 'docker images | awk \'{print $1":"$2}\''
+        result = self.command_run(command)
+        if result.failed:
+            log.error('get images failed')
+            sys.exit(1)
+        else:
+            dockerimages = result.stdout.strip().split('\r\n')
+            log.error('docker images:%s'%(repr(dockerimages)))
+
         try:
             f = open(images_file, 'r')
             try:
                 try:
+                #do some check, skip alrealy exist image
                     for eachline in f:
+                        exist_flag = False
                         li = eachline.strip()
                         if li.startswith('#') or not li:
                             continue
-                        image = li.replace('docker.io','%s:%s'%(self.ip, self.port))
-                        log.debug('image:%s'%image)
-                        command = 'docker tag %s %s'%(li, image)
-                        result = self.command_run(command)
-                        if result.failed:
-                            log.error('docker tag fail')
-                            raise MyException
-                        command = 'docker push %s'%(image)
-                        result = self.command_run(command)
-                        if result.failed:
-                            raise MyException
 
-                        return 
+                        newimage = li.replace('docker.io','%s:%s'%(self.ip, self.port))
+                        tag_image_exist = False
+                        for j in dockerimages:
+                            if j == newimage:
+                                log.info('tag image found,skip')
+                                tag_image_exist = True
+                                break
+                            
+                        if not tag_image_exist:
+                            command = 'docker tag %s %s'%(li, newimage)
+                            result = self.command_run(command)
+                            if result.failed:
+                                log.error('docker tag fail')
+                                raise MyException
+                        command = 'docker push %s'%(newimage)
+                        result = self.command_run(command)
+                        if result.failed:
+                            raise MyException
+                #need some cleanup?
                 except MyException:
                     log.error('push image fail')
                     sys.exit(1)
@@ -341,6 +410,29 @@ class RancherServer(object):
     def validate(self):
         return self.registry_ip != None and self.registry_port != None and self.ip != None and self.port != None 
 
+    def check_env(self):
+        try:
+            result = self.command_run('which docker') 
+            if result.failed:
+                log.error('docker not intalled')
+                raise MyException
+
+            result = self.command_run('docker version')
+            if result.failed:
+                if confirm('docker daemon isn\'t running, Try to start it?'):
+                    result = self.command_run('systemctl start docker') 
+                    if result.failed:
+                        log.error('Can\'t start docker daemon')
+                        raise MyException
+                else:
+                    log.error('cancel to start docker daemon')
+                    raise MyException
+            else:
+                log.info('check docker enviroment success')
+                return True
+        except MyException:
+            return False
+
     def check_host(self):
         if self.local:
             return True
@@ -362,7 +454,8 @@ class RancherServer(object):
             return True
 
     def check_registry(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
+        #command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
+        command = 'docker ps | awk \'{print $2}\' | grep registry:2'
         if self.registry_ip == get_hostip():
             with settings(warn_only=True):
                 result = local(command)
@@ -383,7 +476,7 @@ class RancherServer(object):
                     return True
 
     def check_running(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
+        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/%s'%(self.registry_ip, self.registry_port,self.image)
         result = self.command_run(command)
         if result.failed:
             return False
@@ -461,13 +554,13 @@ class RancherServer(object):
             sys.exit(1)
 
     def run_server(self):
-        command = 'docker pull %s:%s/rancher/server'%(self.registry_ip, self.registry_port)
+        command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
         try:
             result = self.command_run(command)
             if result.failed:
                 log.error('pull image fail')
                 raise MyException
-            command = 'docker run -d --restart=always -p %s:8080 %s:%s/rancher/server' % (self.port, self.registry_ip, self.registry_port)
+            command = 'docker run -d --restart=always -p %s:8080 %s:%s/%s' % (self.port, self.registry_ip, self.registry_port, self.image)
             result = self.command_run(command)
             if result.failed:
                 log.error('run rancher server fail')
@@ -491,8 +584,8 @@ class RancherServer(object):
 #docker run -d -e ENV_DOCKER_REGISTRY_HOST=192.168.4.32 -e ENV_DOCKER_REGISTRY_PORT=5000 -e ENV_MODE_BROWSE_ONLY=false -p 9988:80 konradkleine/docker-registry-frontend:v2
 class RegistryFrontend(object):
     def __new__(cls, ip, password, registry_ip, registry_port, registry_password, port, name):
-        if image and ip and registry_ip and registry_port:
-            return super(Registry, cls).__new__(cls)
+        if ip and registry_ip and registry_port:
+            return super(RegistryFrontend, cls).__new__(cls)
         else:
             return None
 
@@ -526,20 +619,24 @@ class RegistryFrontend(object):
                 log.error('docker not intalled')
                 raise MyException
             result = self.command_run('docker version')
-            if result.failed and confirm('docker daemon isn\'t running, Try to start it?'):
-                result = self.command_run('systemctl start docker') 
-                if result.failed:
-                    log.error('Can\'t start docker daemon')
-                    raise MyException
+            if result.failed:
+                if confirm('docker daemon isn\'t running, Try to start it?'):
+                    result = self.command_run('systemctl start docker') 
+                    if result.failed:
+                        log.error('Can\'t start docker daemon')
+                        raise MyException
                 else:
                     log.error('cancel to start docker daemon')
                     raise MyException
-            log.info('check docker enviroment success')
+            else:
+                log.info('check docker enviroment success')
+                return True
         except MyException:
-            sys.exit(1) 
+            return False
     #for pull image and registry must run 
     def check_registry(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
+        #command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
+        command = 'docker ps | awk \'{print $2}\' | grep registry:2'
         if self.registry_ip == get_hostip():
             with settings(warn_only=True):
                 result = local(command)
@@ -580,7 +677,7 @@ class RegistryFrontend(object):
                     return True
     #check container is running?
     def check_running(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
+        command = 'docker ps | awk \'{print $2}\' | grep %s'%(self.image)
         result = self.command_run(command)
         if result.failed:
             return False
@@ -605,8 +702,9 @@ class RegistryFrontend(object):
         if result.failed:
             logging.warn('can\'t get docker images')
         else:
-            froent_image = 'docker.io/%s'%(self.image)
-            for image in result.stdout.strip():
+            frontend_image = 'docker.io/%s'%(self.image)
+            dockerimages = result.stdout.strip().split('\r\n')
+            for image in dockerimages:
                 if image == frontend_image:
                     log.debug('image[%s] exists, skipping pull'%(frontend_image))
                     return
@@ -617,10 +715,16 @@ class RegistryFrontend(object):
             sys.exit(1)
 
         #need to add check for images.existence
-        command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
-        result = self.command_run(command)
-        if result.failed:
-            sys.exit(1)
+        tag_image = 'docker.io/%s'%(self.image)
+        for j in dockerimages:
+            if j == self.image:
+                log.info('%s exist, skip tag'%(self.image))
+                return 
+            else:
+                command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
+                result = self.command_run(command)
+                if result.failed:
+                    sys.exit(1)
 
     def restart_docker(self):
         command = 'systemctl restart docker'
@@ -669,7 +773,7 @@ class RegistryFrontend(object):
 
 
     def run_container(self):
-        command = 'docker run -d -e --restart=always ENV_DOCKER_REGISTRY_HOST=%s -e ENV_DOCKER_REGISTRY_PORT=%s -e ENV_MODE_BROWSE_ONLY=false -p %s:80 --name %s konradkleine/docker-registry-frontend:v2'%(self.registry_ip, self.registry_port, self.port, self.name)
+        command = 'docker run -d  --restart=always -e ENV_DOCKER_REGISTRY_HOST=%s -e ENV_DOCKER_REGISTRY_PORT=%s -e ENV_MODE_BROWSE_ONLY=false -p %s:80 --name %s konradkleine/docker-registry-frontend:v2'%(self.registry_ip, self.registry_port, self.port, self.name)
         result = self.command_run(command)
         if result.failed:
             log.error('web server container run fail')
@@ -699,7 +803,7 @@ class RancherAgent(object):
         self.ip = ip
         self.password = password
         self.command = add_host_command
-        self.image = 'rancher/agent-instance:v0.6.0'
+        self.image = 'rancher/agent:v0.8.2'
 
         if self.ip == get_hostip():
             self.local = True
@@ -739,7 +843,8 @@ class RancherAgent(object):
             return True
 
     def check_registry(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
+     #   command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
+        command = 'docker ps | awk \'{print $2}\' | grep registry:2'
         if self.registry_ip == get_hostip():
             with settings(warn_only=True):
                 result = local(command)
@@ -775,32 +880,28 @@ class RancherAgent(object):
             with settings(warn_only=True):
                 result = run(command)
                 if result.failed:
-                    log.error('rancher server  is not running')
+                    log.error('rancher server is not running')
                     return False
                 else:
                     return True
 
 
     def check_running(self):
-        command = 'docker ps | awk \'{print $2}\''
+        command = 'docker ps | awk \'{print $2}\' | grep %s'%(self.image)
         result = self.command_run(command)
         if result.failed:
-            log.error('docker list image fail')
             return False
         else:
-            for image in result.stdout.split():
-                if image == 'rancher/agent:v0.8.2':
-                    return False
             return True
 
     def command_run(self, command):
         if self.local:
-            with settings(warn_only=True):
+            with settings(hide('stdout,stderr'), warn_only=True):
                 return local(command)
         else:
             env.host_string = "%s:%s"%(self.ip ,22) 
             env.password = self.password
-            with settings(warn_only=True):
+            with settings(hide('stdout','stderr'), warn_only=True):
                 return run(command)
 
     def add_registry(self):
@@ -853,41 +954,61 @@ class RancherAgent(object):
         result = self.command_run(command)
         if result.failed:
             logging.warn('can\'t get docker images')
+            sys.exit(1)
         else:
             agent_image = 'docker.io/%s'%(self.image)
-            for image in result.stdout.strip():
+            agent_instance_image = 'docker.io/agent-instance:v0.6.0'
+            dockerimages = result.stdout.strip().split('\r\n')
+            log.info('agent_image:%s'%repr(agent_image))
+            log.info('agent_instance_image:%s'%repr(agent_instance_image))
+            e_agent = False
+            e_instance = False
+            t_agent_instance = False
+            t_agent = False
+            for i in dockerimages:
+                log.info('image:%s'%repr(i))
+            for image in dockerimages:
                 if image == agent_image:
-                    log.debug('image[%s] exists, skipping pull'%(agent_image))
-                    return
+                    t_agent = True
+                    continue
+                if  image == agent_instance_image:
+                    t_agent_instance = True
+                    continue
+                r_agent = agent_image.replace('docker.io','%s:%s'%(self.registry_ip, self.registry_port))
+                log.info('r_agent:%s'%(r_agent))
+                if image == r_agent:
+                    e_agent = True
+                    continue
 
-        command = 'docker pull %s:%s/rancher/agent-instance:v0.6.0'%(self.registry_ip, self.registry_port)
-        result = self.command_run(command)
-        if result.failed:
-            sys.exit(1)
+                r_instance = agent_instance_image.replace('docker.io','%s:%s'%(self.registry_ip, self.registry_port))
+                if image == r_instance:
+                    e_instance = True
 
-        command = 'docker tag %s:%s/rancher/agent-instance:v0.6.0 docker.io/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
-        result = self.command_run(command)
-        if result.failed:
-            sys.exit(1)
-    
+            if not e_instance:
+                command = 'docker pull %s:%s/rancher/agent-instance:v0.6.0'%(self.registry_ip, self.registry_port)
+                result = self.command_run(command)
+                if result.failed:
+                    sys.exit(1)
+
+            if not t_agent_instance:
+                command = 'docker tag %s:%s/rancher/agent-instance:v0.6.0 docker.io/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
+                result = self.command_run(command)
+                if result.failed:
+                    sys.exit(1)
+
+            if not e_agent:
+                command = 'docker pull %s:%s/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
+                result = self.command_run(command)
+                if result.failed:
+                    sys.exit(1)
+            
+            if not t_agent:
+                command = 'docker tag %s:%s/rancher/agent:v0.8.2 docker.io/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
+                result = self.command_run(command)
+                if result.failed:
+                    sys.exit(1)
 
     def run_agent(self):
-        command = 'docker pull %s:%s/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
-        result = self.command_run(command)
-        if result.failed:
-            sys.exit(1)
-    
-        command = 'docker tag %s:%s/rancher/agent:v0.8.2 docker.io/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
-        result = self.command_run(command)
-        if result.failed:
-            sys.exit(1)
-
-        command = 'docker tag docker.io/rancher/agent:v0.8.2 docker.io/rancher/agent:latest'
-        result = self.command_run(command)
-        if result.failed:
-            sys.exit(1)
-                
-        log.error('Agent:command'+self.command)
         result = self.command_run(self.command) 
         if result.failed:
             log.error('run agent fail')
@@ -899,47 +1020,6 @@ class RancherAgent(object):
         
         command = 'setenforce 0'
            
-def add_insecure_registry(docker_conf, ip, port):
-    content = '--insecure-registry %s:%s' % (ip, port)
-   # docker_conf = '/etc/sysconfig/docker'
-    if not os.path.exists(docker_conf):
-        log.error('missing docker conf')
-        sys.exit(1)
-
-    try:
-        f = open(docker_conf, 'r+')
-        try:
-            filedata = file.read()
-            sl = list()
-            for line in filedata.split('\n'):
-                if re.match(r'^INSECURE_REGISTRY=', line.strip(), re.M):
-                    li = line.strip().rstrip('\'')+' --insecure-registry %s:%s\''%(ip, port)
-                elif re.match(r'^#INSECURE_REGISTRY=', line.strip(), re.M):
-                    li = 'INSECURE_REGISTRY=\'--insecure-registry %s:%s\''%(ip, port)
-                else:
-                    li = line
-                sl.append(li)
-
-            newfiledata = '\n'.join(sl)
-            f.seek(0, 0)
-            try:
-                f.write(newfiledata)
-            except Exception, e:
-                log.error('modify %s fail'%(docker_conf))
-                return False
-
-        except Exception,e:
-            log.error('read %s fail'%(docker_conf))
-            return False
-        finally:
-            f.close()
-
-    except Exception, e:
-        log.error('open docker conf fail') 
-        return False
-    return True
-
-
 def confirm(msg):
     while True:
         try:
@@ -954,7 +1034,6 @@ def confirm(msg):
             sys.exit(1)
         else:
             pass
-
        
 def get_hostip():
     try:
@@ -1080,8 +1159,6 @@ def parse_agent_conf(config_path):
                 agents_conf[ips[ipkey]] = pws[pwkey]
                 break
 
-
-
     return agents_conf
 
 def list_registry():
@@ -1104,12 +1181,16 @@ def setup_agent(conf_db, agents_conf, ip):
                          )
     #def __new__(cls, registry_ip, registry_port, registry_password, server_ip, server_password, ip, password, command):
     if not agent.check_host():
-        return
-    if not agent.check_rancher_server():
-        return
-    if not agent.check_registry():
+        log.error('can\'t connect to host')
         return
     if agent.check_running():
+        log.error('Agent is running')
+        return
+    if not agent.check_rancher_server():
+        log.error('rancher server aren\'t running')
+        return
+    if not agent.check_registry():
+        log.error('registry aren\'t running')
         return
     agent.add_registry()
     agent.restart_docker()
@@ -1154,15 +1235,27 @@ def main():
             if not rg:
                 log.error('Invalid Registry Conf')
                 sys.exit(1)
-            rg.validate()
-            rg.display()
-            rg.check_env()
+           # rg.validate()
+           # rg.display()
+            if not rg.check_host():
+                log.error('Can\'t connect to host[%s]'%(rg.ip))
+                sys.exit(1)
+            if not rg.check_env():
+                log.error('docker\'s environment not sufficient')
+                sys.exit(1)
+            
             rg.load_images(zipped_path, images_file)
             rg.set_system_firewalld_selinux()
-            rg.run_registry()
-            rg.add_registry()
-            rg.push_private_registry(images_file)
+            if not rg.check_running():
+                log.info('start to run registry ')
+                rg.run_registry()
+                rg.add_registry()
+                rg.push_private_registry(images_file)
+            else:
+                log.info('registry is running, push new images')
+                rg.push_private_registry(images_file)
             break                    
+
 
     while True:
         try:
@@ -1191,13 +1284,16 @@ def main():
             if not rs:
                 log.error('Rancher Server Invalid conf')
                 sys.exit(1)
+            if not rs.check_host():
+                log.error('can\'t connect to Host')
+                sys.exit(1)
             if not rs.check_env():
                 log.error('docker enviroment not sufficient')
                 sys.exit(1)
             if not rs.check_registry():
                 log.error('registry is not running')
                 sys.exit(1)
-            if not rs.check_running():
+            if rs.check_running():
                 log.info('rancher server is running')
                 break
             rs.add_registry()
@@ -1239,7 +1335,7 @@ def main():
                 if not rf.check_env():
                     log.error('docker enviroment not sufficient')
                     sys.exit(1)
-                if rf.check_running()
+                if rf.check_running():
                     log.info('registry frontend is running')
                     break
                 if not rf.check_registry():
@@ -1286,6 +1382,5 @@ def main():
         
 if __name__ == '__main__':
     main()
-
 
    

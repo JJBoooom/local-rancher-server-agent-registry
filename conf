@@ -3,7 +3,7 @@
 # For example:8080.
 # port: [default]8080
 [SERVER]
-ip=192.168.4.29
+ip=192.168.4.30
 port=8080
 password=Cloudsoar123
 
@@ -14,16 +14,16 @@ password=Cloudsoar123
 #password: password of registry host. If empty, you need to input when script runs.
 [REGISTRY]
 ip= 192.168.4.30
-port=
+port=5000
 name=
 store=
 password=Cloudsoar123
 
 [REGISTRY_FRONTEND]
 
-ip=
-port=
-password=
+ip=192.168.4.30
+port=9980
+password=Cloudsoar123
 name=
 
 
@@ -33,8 +33,7 @@ rancher-server-command= docker run -d --privileged -v /var/run/docker.sock:/var/
 ip1= 192.168.4.201
 password1= Cloudsoar123
 
-ip2= 192.168.4.202
-password2= Cloudsoar123
-
+#ip2= 192.168.4.202
+#password2= Cloudsoar123
 
 
