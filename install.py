@@ -91,6 +91,13 @@ class Registry(object):
         else:   
             return True
 
+    def check_port(self):
+        command = 'netstat -talnp | grep %s'%(self.port)
+        result = self.command_run(command)
+        if result:
+            return False 
+        else:
+            return True
     def command_run(self, command):
         if self.local:
             with settings(
@@ -433,6 +440,14 @@ class RancherServer(object):
         except MyException:
             return False
 
+    def check_port(self):
+        command = 'netstat -talnp | grep %s'%(self.port)
+        result = self.command_run(command)
+        if result.failed:
+            return False 
+        else:
+            return True
+
     def check_host(self):
         if self.local:
             return True
@@ -656,6 +671,14 @@ class RegistryFrontend(object):
                 else:
                     return True
 
+    def check_port(self):
+        command = 'netstat -talnp | grep %s'%(self.port)
+        result = self.command_run(command)
+        if result.failed:
+            return False 
+        else:
+            return True
+
     def check_host(self):
         if self.local:
             return True
@@ -789,16 +812,17 @@ class RegistryFrontend(object):
 #need to find some way to check rancher server is running?
 # http request to website? good way but how?
 class RancherAgent(object):
-    def __new__(cls, registry_ip, registry_port, registry_password, server_ip, server_password, ip, password, add_host_command):
-        if ip and registry_ip and registry_port and server_ip and add_host_command:
+    def __new__(cls, registry_ip, registry_port, registry_password, server_ip, server_port,server_password, ip, password, add_host_command):
+        if ip and registry_ip and registry_port and server_ip and server_port and add_host_command:
             return super(RancherAgent, cls).__new__(cls)
         else:
             return None
-    def __init__(self, registry_ip, registry_port, registry_password, server_ip, server_password, ip,  password, add_host_command):
+    def __init__(self, registry_ip, registry_port, registry_password, server_ip, server_port,server_password, ip,  password, add_host_command):
         self.registry_ip = registry_ip
         self.registry_port = registry_port
         self.registry_password = registry_password
         self.server_ip = server_ip
+        self.server_port = server_port
         self.server_password = server_password
         self.ip = ip
         self.password = password
@@ -840,6 +864,14 @@ class RancherAgent(object):
                 if result.failed:  
                     log.error('connect to \'%s\' fail'%self.ip)
                     return False
+            return True
+
+    def check_port(self):
+        command = 'netstat -talnp | grep %s'%(self.port)
+        result = self.command_run(command)
+        if result.failed:
+            return False 
+        else:
             return True
 
     def check_registry(self):
@@ -904,6 +936,15 @@ class RancherAgent(object):
             with settings(hide('stdout','stderr'), warn_only=True):
                 return run(command)
 
+    def check_command(self):
+        match_string = r'.*http://%s:%s/v1/scripts/.*'%(self.server_ip,self.server_port)
+        log.info('%s'%match_string)
+        searchObj = re.search(match_string, self.command, re.I)
+        if searchObj:
+            return True
+        else:
+            return False
+
     def add_registry(self):
         env.host_string = "%s:%s"%(self.ip ,22) 
         env.password = self.password
@@ -947,20 +988,19 @@ class RancherAgent(object):
         command = 'systemctl restart docker'
         result = self.command_run(command)
         if result.failed:
-            sys.exit(1)
+            return False
 
     def pull_image(self):
         command = 'docker images | awk \'{print $1":"$2}\'' 
         result = self.command_run(command)
         if result.failed:
             logging.warn('can\'t get docker images')
-            sys.exit(1)
+            return False
         else:
             agent_image = 'docker.io/%s'%(self.image)
             agent_instance_image = 'docker.io/rancher/agent-instance:v0.6.0'
             dockerimages = result.stdout.strip().split('\r\n')
-            log.info('agent_image:%s'%repr(agent_image))
-            log.info('agent_instance_image:%s'%repr(agent_instance_image))
+
             e_agent = False
             e_instance = False
             t_agent_instance = False
@@ -983,43 +1023,44 @@ class RancherAgent(object):
                 if image == r_instance:
                     e_instance = True
 
-                log.error('current image :%s, agent_image:%s,instance:%s, r_agent:%s,r_instance:%s'%(image, agent_image,agent_instance_image,r_agent,r_instance))
-
             if not e_instance:
                 command = 'docker pull %s:%s/rancher/agent-instance:v0.6.0'%(self.registry_ip, self.registry_port)
                 result = self.command_run(command)
                 if result.failed:
-                    sys.exit(1)
-
+                    return False
+                    
             if not t_agent_instance:
-                command = 'docker tag %s:%s/rancher/agent-instance:v0.6.0 docker.io/rancher/agent_instance:v0.6.0'%(self.registry_ip, self.registry_port)
+                command = 'docker tag %s:%s/rancher/agent-instance:v0.6.0 docker.io/rancher/agent-instance:v0.6.0'%(self.registry_ip, self.registry_port)
                 result = self.command_run(command)
                 if result.failed:
-                    sys.exit(1)
+                    return False
 
             if not e_agent:
                 command = 'docker pull %s:%s/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
                 result = self.command_run(command)
                 if result.failed:
-                    sys.exit(1)
+                    return False
             
             if not t_agent:
                 command = 'docker tag %s:%s/rancher/agent:v0.8.2 docker.io/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
                 result = self.command_run(command)
                 if result.failed:
-                    sys.exit(1)
+                    return False
+            return True
 
     def run_agent(self):
         result = self.command_run(self.command) 
         if result.failed:
-            log.error('run agent fail')
-            sys.exit(1)
+            return False
+        else:
+            return True
         
     def set_system_firewalld_selinux(self):
         command = 'systemctl stop firewalld'
         self.command_run(command)
         
         command = 'setenforce 0'
+        self.command_run(command)
            
 def confirm(msg):
     while True:
@@ -1175,14 +1216,21 @@ def setup_agent(conf_db, agents_conf, ip):
                          conf_db['registry_port'], 
                          conf_db['registry_password'],
                          conf_db['server_ip'],
+                         conf_db['server_port'],
                          conf_db['server_password'],
                          ip,
                          agents_conf[ip],
                          agents_conf['rancher-server-command']
                          )
     #def __new__(cls, registry_ip, registry_port, registry_password, server_ip, server_password, ip, password, command):
+    if not agent.check_command():
+        log.error('rancher server and agent command aren\'t match')
+        return
     if not agent.check_host():
         log.error('can\'t connect to host')
+        return
+    if not agent.check_port():
+        log.error('port is used, pleae use another one')
         return
     if agent.check_running():
         log.error('Agent is running')
@@ -1244,6 +1292,9 @@ def main():
             if not rg.check_env():
                 log.error('docker\'s environment not sufficient')
                 sys.exit(1)
+            if not rg.check_port():
+                log.error('port is used. please use another')
+                sys.exit(1)
             
             rg.load_images(zipped_path, images_file)
             rg.set_system_firewalld_selinux()
@@ -1287,6 +1338,9 @@ def main():
                 sys.exit(1)
             if not rs.check_host():
                 log.error('can\'t connect to Host')
+                sys.exit(1)
+            if not rs.check_port():
+                log.error('port is used, please use another one')
                 sys.exit(1)
             if not rs.check_env():
                 log.error('docker enviroment not sufficient')
@@ -1332,6 +1386,9 @@ def main():
             else:
                 if not rf.check_host():
                     log.error('can\'t connect to host')
+                    sys.exit(1)
+                if not rf.check_port():
+                    log.error('port is used, please use another one')
                     sys.exit(1)
                 if not rf.check_env():
                     log.error('docker enviroment not sufficient')
