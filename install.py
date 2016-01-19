@@ -31,12 +31,12 @@ class FabricSupport:
         pass
     def command_run(self,localflag, ip, password,command):
         if localflag:
-            with settings(warn_only=True):
+            with settings(hide('stdout','stderr','running',),warn_only=True):
                 return local(command)
         else:
             env.host_string = "%s:%s"%(ip ,22) 
             env.password = password
-            with settings(warn_only=True):
+            with settings(hide('stdout','stderr','running',),warn_only=True):
                 return run(command)
 
     def move_file(self,localflag,ip, password, src, dest):
@@ -46,6 +46,7 @@ class FabricSupport:
             env.host_string = "%s:%s"%(ip ,22) 
             env.password = password
             return put(src, dest)
+
 
 class Registry(object):
     def __new__(cls, ip, port, password, name, store):
@@ -101,12 +102,14 @@ class Registry(object):
     def command_run(self, command):
         if self.local:
             with settings(
-                hide('stdout','stderr'),
+                hide('stdout','stderr','running'),
                 warn_only=True
             ):
                 return local(command)
         else:
-            with settings(warn_only=True):
+            with settings(
+            hide('stdout','stderr','running'),
+            warn_only=True):
                 env.host_string = "%s:%s"%(self.ip ,22) 
                 env.password = self.password
                 return run(command)
@@ -123,19 +126,22 @@ class Registry(object):
         if self.local:
             return True
         else:
-            command = 'ping %s -c 3'%(self.ip)
-            with settings(warn_only=True):
+            command = 'ping %s -c 3 >/dev/null'%(self.ip)
+            with settings(hide('stdout','running'),warn_only=True):
                 result = local(command)
             if result.failed:
                 log.error('\'%s\' connection not reach'%(self.ip))
                 return False
             else:
             #purpose: check password. need accurate method
+                log.info('Connect to \'%s\' success...'%(self.ip))
                 command = 'ls'
                 result = self.command_run(command)
                 if result.failed:  
                     log.error('connect to \'%s\' fail'%self.ip)
                     return False
+                else:
+                    log.info('login to \'%s\' success'%self.ip)
             return True
     #缺少端口,镜像名以及共享卷合法性认证
 
@@ -170,13 +176,12 @@ class Registry(object):
 
     def load_images(self, zipped_path, images_file):
         if not zipped_path or not images_file:
-            log.debug('mising arguments')
             sys.exit(1)
         if not os.path.exists(zipped_path) or not os.path.exists(images_file):
-            log.error('missing images zipped')
+            log.error('mising %s or %s file'%(zipped_path,images_file))
             sys.exit(1)
 
-        log.debug('start to load images..')
+        log.info('start to load images..')
         command = 'docker images | awk \'{print $1":"$2}\''
         result = self.command_run(command)
         if result.failed:
@@ -184,16 +189,11 @@ class Registry(object):
             sys.exit(1)
         else:
             dockerimages = result.stdout.strip().split('\r\n')
-            for i in dockerimages:
-                print i
+
             try:
                 dockerimages.remove("REPOSITORY:TAG")
             except ValueError:
                 pass
-            log.debug('..................')
-            for i in dockerimages:
-                print i
-            
            
             if dockerimages: 
                 log.debug('check if all image exist in local')
@@ -218,7 +218,7 @@ class Registry(object):
                 finally:
                     f.close()
             else:
-                log.debug('missing  image,start to load image')
+                log.debug('some images don\'t exist in local,start to load image')
 
         try:
             tempdir = ''
@@ -325,7 +325,6 @@ class Registry(object):
             sys.exit(1)
         else:
             dockerimages = result.stdout.strip().split('\r\n')
-            log.error('docker images:%s'%(repr(dockerimages)))
 
         try:
             f = open(images_file, 'r')
@@ -342,7 +341,7 @@ class Registry(object):
                         tag_image_exist = False
                         for j in dockerimages:
                             if j == newimage:
-                                log.info('tag image found,skip')
+                                log.debug('tag image found,skip')
                                 tag_image_exist = True
                                 break
                             
@@ -453,12 +452,13 @@ class RancherServer(object):
             return True
         else:
             command = 'ping %s -c 3'%(self.ip)
-            with settings(warn_only=True):
+            with settings(hide('stdout','stderr','running',),warn_only=True):
                 result = local(command)
             if result.failed:
                 log.error('\'%s\' connection not reach'%(self.ip))
                 return False
             else:
+                log.info('connect to \'%s\' success'%(self.ip))
             #purpose: check password. need accurate method
             #paramiko will be better way
                 command = 'ls'
@@ -466,6 +466,8 @@ class RancherServer(object):
                 if result.failed:  
                     log.error('connect to \'%s\' fail'%self.ip)
                     return False
+                else:
+                    log.info('login to \'%s\' success'%(self.ip))
             return True
 
     def check_registry(self):
@@ -500,12 +502,16 @@ class RancherServer(object):
 
     def command_run(self, command):
         if self.local:
-            with settings(warn_only=True):
+            with settings(
+            hide('stdout','stderr','running'),
+            warn_only=True):
                 return local(command)
         else:
             env.host_string = "%s:%s"%(self.ip ,22) 
             env.password = self.password
-            with settings(warn_only=True):
+            with settings(
+            hide('stdout','stderr', 'running'),
+            warn_only=True):
                 return run(command)
 
     def add_registry(self):
@@ -684,7 +690,7 @@ class RegistryFrontend(object):
             return True
         else:
             command = 'ping %s -c 3'%(self.ip)
-            with settings(warn_only=True):
+            with settings(hide('stdout','stderr','running',),warn_only=True):
                 result = local(command)
             if result.failed:
                 log.error('\'%s\' connection not reach'%(self.ip))
@@ -710,12 +716,16 @@ class RegistryFrontend(object):
     
     def command_run(self, command):
         if self.local:
-            with settings(warn_only=True):
+            with settings(
+            hide('stdout','stderr','running'),
+            warn_only=True):
                 return local(command)
         else:
             env.host_string = "%s:%s"%(self.ip ,22) 
             env.password = self.password
-            with settings(warn_only=True):
+            with settings(
+            hide('stdout','stderr','running'),
+            warn_only=True):
                 return run(command)
     
     def pull_image(self):
@@ -852,7 +862,7 @@ class RancherAgent(object):
         else:
             #
             command = 'ping %s -c 3'%(self.ip)
-            with settings(warn_only=True):
+            with settings(hide('stdout, stderr,'),warn_only=True):
                 result = local(command)
             if result.failed:
                 log.error('\'%s\' connection not reach'%(self.ip))
@@ -928,12 +938,12 @@ class RancherAgent(object):
 
     def command_run(self, command):
         if self.local:
-            with settings(hide('stdout,stderr'), warn_only=True):
+            with settings(hide('stdout','stderr','running'), warn_only=True):
                 return local(command)
         else:
             env.host_string = "%s:%s"%(self.ip ,22) 
             env.password = self.password
-            with settings(hide('stdout','stderr'), warn_only=True):
+            with settings(hide('stdout','stderr','running'), warn_only=True):
                 return run(command)
 
     def check_command(self):
@@ -1080,7 +1090,10 @@ def confirm(msg):
 def get_hostip():
     try:
         hostip = subprocess.check_output(["/bin/sh", "-c", 'ip route show | grep "192.168" | grep "metric" | grep -v "default" | awk \'{print $9}\'']).strip('\n')
-        log.debug("hostip:"+hostip)
+        if not hostip:
+            log.error('can\'t get local host ip')
+            sys.exit(1)
+
         return hostip
     except Exception,e:
         log.error("Can not get host ip:"+str(e))
@@ -1107,7 +1120,6 @@ def parse_conf(config_path):
 
     conf_db = {}
     try:
-
         config = ConfigParser.RawConfigParser()
         config.read(config_path)
 
@@ -1229,11 +1241,11 @@ def setup_agent(conf_db, agents_conf, ip):
     if not agent.check_host():
         log.error('can\'t connect to host')
         return
-    if not agent.check_port():
-        log.error('port is used, pleae use another one')
-        return
     if agent.check_running():
         log.error('Agent is running')
+        return
+    if not agent.check_port():
+        log.error('port is used, pleae use another one')
         return
     if not agent.check_rancher_server():
         log.error('rancher server aren\'t running')
@@ -1292,13 +1304,13 @@ def main():
             if not rg.check_env():
                 log.error('docker\'s environment not sufficient')
                 sys.exit(1)
-            if not rg.check_port():
-                log.error('port is used. please use another')
-                sys.exit(1)
             
             rg.load_images(zipped_path, images_file)
             rg.set_system_firewalld_selinux()
             if not rg.check_running():
+                if not rg.check_port():
+                    log.error('port is used. please use another')
+                    sys.exit(1)
                 log.info('start to run registry ')
                 rg.run_registry()
                 rg.add_registry()
@@ -1339,9 +1351,6 @@ def main():
             if not rs.check_host():
                 log.error('can\'t connect to Host')
                 sys.exit(1)
-            if not rs.check_port():
-                log.error('port is used, please use another one')
-                sys.exit(1)
             if not rs.check_env():
                 log.error('docker enviroment not sufficient')
                 sys.exit(1)
@@ -1351,6 +1360,9 @@ def main():
             if rs.check_running():
                 log.info('rancher server is running')
                 break
+            if not rs.check_port():
+                log.error('port is used, please use another one')
+                sys.exit(1)
             rs.add_registry()
             rs.restart_docker()
             rs.run_server()
@@ -1387,15 +1399,15 @@ def main():
                 if not rf.check_host():
                     log.error('can\'t connect to host')
                     sys.exit(1)
-                if not rf.check_port():
-                    log.error('port is used, please use another one')
-                    sys.exit(1)
                 if not rf.check_env():
                     log.error('docker enviroment not sufficient')
                     sys.exit(1)
                 if rf.check_running():
                     log.info('registry frontend is running')
                     break
+                if not rf.check_port():
+                    log.error('port is used, please use another one')
+                    sys.exit(1)
                 if not rf.check_registry():
                     log.error('registry is not running')
                     sys.exit(1)

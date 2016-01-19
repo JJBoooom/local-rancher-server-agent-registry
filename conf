@@ -8,10 +8,11 @@ port=8080
 password=Cloudsoar123
 
 #registry
+#ip: host to install
 #port: registry host port, default=5000
 #name: registry name.Can be empty,default=MyPrivateRegistry.
 #store: volume shared between host and registry container.Can be empty, default to '/var/lib/MyPrivateRegistry'
-#password: password of registry host. If empty, you need to input when script runs.
+#password: password of host. If empty, you need to input when script runs.
 [REGISTRY]
 ip= 192.168.4.30
 port=5000
@@ -19,8 +20,11 @@ name=
 store=
 password=Cloudsoar123
 
+#regitry web frontend
+#ip: host to install
+#port: port to used 
+#password: password of host. If empty, you need to input when script runs.
 [REGISTRY_FRONTEND]
-
 ip=192.168.4.30
 port=9980
 password=Cloudsoar123
@@ -28,10 +32,10 @@ name=
 
 
 [AGENT]
-rancher-server-command= docker run -d --privileged -v /var/run/docker.sock:/var/run/docker.sock 192.168.4.30:5000/rancher/agent:v0.8.2 http://192.168.4.29:8080/v1/scripts/AA1A27F4E6280F02B56C:1452819600000:fVONQdGTpxD5lp1EIPY7wy58oUQ
+rancher-server-command= 
 
-ip1= 192.168.4.201
-password1= Cloudsoar123
+#ip1= 192.168.4.201
+#password1= Cloudsoar123
 
 #ip2= 192.168.4.202
 #password2= Cloudsoar123
