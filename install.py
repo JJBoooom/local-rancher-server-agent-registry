@@ -957,7 +957,7 @@ class RancherAgent(object):
             sys.exit(1)
         else:
             agent_image = 'docker.io/%s'%(self.image)
-            agent_instance_image = 'docker.io/agent-instance:v0.6.0'
+            agent_instance_image = 'docker.io/rancher/agent-instance:v0.6.0'
             dockerimages = result.stdout.strip().split('\r\n')
             log.info('agent_image:%s'%repr(agent_image))
             log.info('agent_instance_image:%s'%repr(agent_instance_image))
@@ -965,8 +965,7 @@ class RancherAgent(object):
             e_instance = False
             t_agent_instance = False
             t_agent = False
-            for i in dockerimages:
-                log.info('image:%s'%repr(i))
+
             for image in dockerimages:
                 if image == agent_image:
                     t_agent = True
@@ -975,7 +974,7 @@ class RancherAgent(object):
                     t_agent_instance = True
                     continue
                 r_agent = agent_image.replace('docker.io','%s:%s'%(self.registry_ip, self.registry_port))
-                log.info('r_agent:%s'%(r_agent))
+                log.info('r_agent:%s'%repr(r_agent))
                 if image == r_agent:
                     e_agent = True
                     continue
@@ -984,6 +983,8 @@ class RancherAgent(object):
                 if image == r_instance:
                     e_instance = True
 
+                log.error('current image :%s, agent_image:%s,instance:%s, r_agent:%s,r_instance:%s'%(image, agent_image,agent_instance_image,r_agent,r_instance))
+
             if not e_instance:
                 command = 'docker pull %s:%s/rancher/agent-instance:v0.6.0'%(self.registry_ip, self.registry_port)
                 result = self.command_run(command)
@@ -991,7 +992,7 @@ class RancherAgent(object):
                     sys.exit(1)
 
             if not t_agent_instance:
-                command = 'docker tag %s:%s/rancher/agent-instance:v0.6.0 docker.io/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
+                command = 'docker tag %s:%s/rancher/agent-instance:v0.6.0 docker.io/rancher/agent_instance:v0.6.0'%(self.registry_ip, self.registry_port)
                 result = self.command_run(command)
                 if result.failed:
                     sys.exit(1)
