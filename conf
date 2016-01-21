@@ -38,7 +38,7 @@ rancher-server-command=sudo docker run -d --privileged -v /var/run/docker.sock:/
 ip1= 192.168.4.202
 password1= Cloudsoar123
 
-ip2= 192.168.4.202
-password2= Cloudsoar123
+#ip2= 192.168.4.202
+#password2= 
 
 

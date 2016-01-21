@@ -11,7 +11,7 @@ conf=$(dirname $0)/conf
 imagelists=$(dirname $0)/imagelists
 test_sh=$(dirname $0)/test.sh
 
-#package_files="$conf $(dirname $0)/install.sh $images_zipped $imagelists $test_sh"
+package_files='$conf $(dirname $0)/install $images_zipped $imagelists'
 package_dir=$(dirname $0)/packages
 package_tar=$(basename $package_dir).tar
 
@@ -54,7 +54,7 @@ save_imagelists()
     done < $imagelists
     
 #    gzip $images_zipped
-    images_zipped_tar = "$images_zipped.tar"
+    images_zipped_tar="$images_zipped.tar"
     tar cvf - `find $images_zipped -print`  > $images_zipped_tar
     gzip $images_zipped_tar
     
