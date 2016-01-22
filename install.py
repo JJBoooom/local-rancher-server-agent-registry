@@ -233,7 +233,6 @@ class Container(FabricSupport):
     def restart_docker(self):
         command = 'systemctl restart docker'
         result = self.command_run(command)
-        log.info('restart docker ')
         if result.failed:
             log.info('restart docker fail....')
             sys.exit(1)
@@ -398,16 +397,17 @@ def parse_agent_conf(config_path):
         if agents_conf.has_key(ips[ipkey]):
             log.info('skip duplicate host:%s'%(ips[ipkey]))
             continue
+        agents_conf[ips[ipkey]]=''
         ipindex = ipkey.replace('ip', '')
         for pwkey in pws.keys():
             if ipindex == pwkey.replace('password', ''):
                 agents_conf[ips[ipkey]] = pws[pwkey]
                 break
-                
-        for ipindex in agents_conf.keys():
-            if not agents_conf[ipindex]:
-                content='Enter the %s\'s password:'%(ipindex)
-                agents_conf[ipindex]= getpass.getpass(prompt=content)
+
+        for agentkey in agents_conf.keys():
+            if not agents_conf[agentkey]:
+                content='Enter the %s\'s password:'%(agentkey)
+                agents_conf[agentkey]= getpass.getpass(prompt=content)
 
     if len(agents_conf) == 1 and 'rancher-server-command' in agents_conf:
         raise MyException('Agents:missing ip/password pair')
@@ -436,23 +436,24 @@ def setup_agent(conf_db, agents_conf, ip):
                              add_host_command=agents_conf['rancher-server-command']
                          )
     except ContainerParameterError:
-        log.error('invalid conf, check if missing some conf')
-        sys.exit(1)
+        raise MyException('invalid conf, check if missing some conf')
     try: 
         agent.check_command()
         agent.check_host()
         if agent.check_running():
-            sys.exit(0)
+            return  
         agent.check_port_used()
         agent.check_rancher_server()
         agent.check_registry()
         agent.add_registry(agent.registry_ip, agent.registry_port)
+        log.info('restart docker...')
         agent.restart_docker()
+        log.info('pulling images...')
         agent.pull_image()
+        log.info('running agent...')
         agent.run_agent()
     except MyException, e:
-        log.error(e)
-        sys.exit(1)
+        raise MyException(str(e))
 
 
 
@@ -578,7 +579,6 @@ class Registry(Container):
             raise MyException('command \'%s\' run fail'%(command))
 
     def push_private_registry(self, images_file):
-        log.info('pushing images to private registry...wait a few minutes')
         if not os.path.exists(images_file):
             raise MyException('image list file does not exist')
 
@@ -871,6 +871,7 @@ class RancherAgent(Container):
 
     def check_port_used(self):
         return False
+
             
     def pull_image(self):
         command = 'docker images | awk \'{print $1":"$2}\'' 
@@ -898,7 +899,6 @@ class RancherAgent(Container):
                     t_agent_instance = True
                     continue
                 r_agent = agent_image.replace('docker.io','%s:%s'%(self.registry_ip, self.registry_port))
-                log.info('r_agent:%s'%repr(r_agent))
                 if image == r_agent:
                     e_agent = True
                     continue
@@ -936,6 +936,7 @@ class RancherAgent(Container):
         if result.failed:
             raise MyException('run \'%s\' fail'%self.command)
 
+        
 def main():
     script_dir_path =os.path.abspath(os.path.dirname(sys.argv[0]))
     config_path = script_dir_path+'/conf'
@@ -954,6 +955,7 @@ def main():
 
         if choose == 'q':
             log.info("Quiting...")
+            logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
             log.info("Cancel Private Registry install.")
@@ -969,6 +971,7 @@ def main():
                         )
             except ContainerParameterError:
                 log.error('invalid argument')
+                logging.shutdown()
                 sys.exit(1)
             try:
                 rg.check_host()
@@ -980,16 +983,21 @@ def main():
                     log.info('start to run registry ')
                     rg.run_registry()
                     rg.add_registry(rg.ip, rg.port)
+                    log.info('restart docker...')
                     rg.restart_docker()
+                    log.info('push images....')
                     rg.push_private_registry(images_file)
                 else:
                     log.info('registry is running, push new images')
                     rg.add_registry(rg.ip, rg.port)
+                    log.info('restart docker...')
                     rg.restart_docker()
+                    log.info('push images....')
                     rg.push_private_registry(images_file)
                 break                    
             except (MyException, PortUsedError), e:
                 log.error(e)
+                logging.shutdown()
                 sys.exit(1)
 
     while True:
@@ -1002,6 +1010,7 @@ def main():
 
         if choose == 'q':
             log.info("Quiting...")
+            logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
             log.info("Cancel Rancher Server install.")
@@ -1019,9 +1028,11 @@ def main():
                     password=conf_db['server_password'])
             except ContainerParameterError:
                 log.error('invalid conf, check if missing some conf')
+                logging.shutdown()
                 sys.exit(1)
 
             try:  
+                log.info('checking environment..')
                 rs.check_host()
                 rs.check_env()
                 rs.check_registry()
@@ -1030,12 +1041,16 @@ def main():
                     break
                 rs.check_port_used()
                 rs.add_registry(rs.registry_ip,rs.registry_port)
+                log.info('restart docker daemon...')
                 rs.restart_docker()
+                log.info('pulling images ...')
                 rs.pull_image()
+                log.info('running server...')
                 rs.run_server()
                 break
             except (MyException, PortUsedError), e:
                 log.error(e)
+                logging.shutdown()
                 sys.exit(1)
 
     while True:
@@ -1048,6 +1063,7 @@ def main():
 
         if choose == 'q':
             log.info("Quiting...")
+            logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
             log.info("Cancel Registry Frontend install.")
@@ -1066,6 +1082,7 @@ def main():
                   name=conf_db['registry_frontend_name'])
             except ContainerParameterError:
                 log.error('invalid conf, please check conf')
+                logging.shutdown()
                 sys.exit(1)
 
             try:
@@ -1077,10 +1094,15 @@ def main():
                 rf.check_port_used()
                 rf.check_registry()
                 rf.add_registry(rf.registry_ip, rf.registry_port)
+                log.info('restart docker...')
+                rf.restart_docker()
+                log.info('pulling image..')
                 rf.pull_image()
+                log.info('running registry frontend')
                 rf.run_container()
             except (ContainerRunError, MyException, PortUsedError), e:
                 log.error(e)
+                logging.shutdown()
                 sys.exit(1)
 
             log.info('registry frontend starts')
@@ -1096,6 +1118,7 @@ def main():
 
         if choose == 'q':
             log.info("Quiting...")
+            logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
             log.info("Cancel Rancher Agents install.")
@@ -1107,20 +1130,58 @@ def main():
                 agents_conf = parse_agent_conf(config_path)
             except MyException, e:
                 log.error(e)
+                logging.shutdown()
                 sys.exit(1)
 
-            threads = []
-            for ip in agents_conf.keys():
-                if ip != 'rancher-server-command':
-                    t = threading.Thread(target=setup_agent, args=(conf_db, agents_conf, ip, ))
-                    t.start()
-                    threads.append(t)
+            try:
+                threads = []
+                aips = []
+                for ip in agents_conf.keys():
+                    deprecated='''
 
-            for t in threads:
-                t.join()
+
+                    if ip != 'rancher-server-command':
+          #              t = threading.Thread(target=setup_agent, args=(conf_db, agents_conf, ip, ))
+  #                      t = MyThread(target=setup_agent, args=(conf_db, agents_conf, ip, ))
+  #                      t.daemon = True
+  #                      t.start()
+  #                      threads.append(t)
+  #                      aips.append(ip)
+
+          #      for t in threads:
+          #          t.join()
+                while True:
+                    
+                    onealive = False
+                    time.sleep(100)
+                    for t in threads:
+                        if t.isAlive:
+                            onealive = True
+                    if not onealive :
+                        break
+                    
+                for i in range(len(threads)):
+                    if threads[i].err:
+                        log.error('Agent \'%s\' setup failed:%s', aips[i], threads[i].err )
+                    else:
+                        log.info('Agent \'%s\' setup success!', aips[i])
+                log.info('Adding agent finish')
+                break
+                '''
+                    log.info('----------------------------')
+                    log.info('setup agent in \'%s\'...', ip)
+                    setup_agent(conf_db, agents_conf, ip)
+            except MyException, e:
+                log.error('%s setup agent fail:%s, skip...',ip,e)
+            except (KeyboardInterrupt, SystemExit), e:
+                log.error(e)
+                logging.shutdown()
+                sys.exit(1)
             log.info('Adding agent finish')
+            logging.shutdown()
             break
-        
+
+            
 if __name__ == '__main__':
     main()
 
