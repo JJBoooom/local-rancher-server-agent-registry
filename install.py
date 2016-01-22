@@ -15,6 +15,7 @@ from fabric.api import *
 from fabric import exceptions
 import threading
 
+DEBUG=True
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - <%(levelname)s> - %(message)s')
 log = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class FabricSupport:
     def command_run(self, localflag ,command):
         if localflag:
             with settings(hide('warnings','stdout','stderr','running',),warn_only=True):
-                return local(command)
+                return local(command, capture=True)
         else:
             try:
                 env.host_string = "%s:%s"%(self.ip ,22) 
@@ -73,12 +74,14 @@ class FabricSupport:
 
     def move_file(self, localflag, src, dest):
         if localflag:
-            return local('cp -rf %s %s'%(src, dest))
+            with settings(hide('warnings','stdout','stderr','running',),warn_only=True):
+                return local('cp -rf %s %s'%(src, dest),capture=True)
         else:
             try:
                 env.host_string = "%s:%s"%(self.ip ,22) 
                 env.password = self.password
-                return put(src, dest)
+                with settings(hide('warnings','stdout','stderr','running',),warn_only=True):
+                    return put(src, dest)
             except exceptions.NetworkError,e:
                 raise MyException(str(e))
 
@@ -185,6 +188,7 @@ class Container(FabricSupport):
             result = self.command_run(command)
             if result.succeeded:
                 content = 'INSECURE_REGISTRY=\'--insecure-registry %s:%s\''%(registry_ip, registry_port)
+                log.debug('content:%s'%content)
                 command = 'sed -i "s/^\s*#\+\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
                 result = self.command_run(command)
                 if result.failed:
@@ -197,6 +201,7 @@ class Container(FabricSupport):
             result = self.command_run(command)
             if result.succeeded:
                 content = result.stdout.strip().rstrip('\'')+' --insecure-registry %s:%s\'' % (registry_ip, registry_port)
+                log.debug('2content:%s'%content)
                 command = 'sed -i "s/^\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
                 result = self.command_run(command)
                 if result.failed:
@@ -206,6 +211,7 @@ class Container(FabricSupport):
                     return 
 
             content = 'INSECURE_REGISTRY= \'--insecure-registry %s:%s\'' %(registry_ip, registry_port)
+            log.debug('3content:%s'%content)
             command = 'echo \"%s\" >> %s' % (content, docker_conf)
             result = self.command_run(command)
             if result.succeeded:
@@ -218,8 +224,8 @@ class Container(FabricSupport):
             raise MyException('add registry fail')
 
     def set_system_firewalld_selinux(self):
-        command = 'systemctl stop firewalld'
-        self.command_run(command)
+#        command = 'systemctl stop firewalld'
+#        self.command_run(command)
         
         command = 'setenforce 0'
         self.command_run(command)
@@ -227,7 +233,9 @@ class Container(FabricSupport):
     def restart_docker(self):
         command = 'systemctl restart docker'
         result = self.command_run(command)
+        log.info('restart docker ')
         if result.failed:
+            log.info('restart docker fail....')
             sys.exit(1)
               
            
@@ -474,15 +482,18 @@ class Registry(Container):
             log.error('get images failed')
             sys.exit(1)
         else:
-            dockerimages = result.stdout.strip().split('\r\n')
+            if self.local:
+                dockerimages = result.stdout.strip().split('\n')
+            else:
+                dockerimages = result.stdout.strip().split('\r\n')
 
             try:
                 dockerimages.remove("REPOSITORY:TAG")
             except ValueError:
                 pass
-           
+        #    deprecated='''
             if dockerimages: 
-                log.debug('check if all image exist in local')
+                log.info('check if all image exist in local')
                 try:
                     f = open(images_file, 'r')
                     all_match_flag = True
@@ -505,6 +516,7 @@ class Registry(Container):
                     f.close()
             else:
                 log.debug('some images don\'t exist in local,start to load image')
+                
         log.info('start to upload local image tar package, it will lasts a few minutes, please wait in patience....')
         try:
             tempdir = ''
@@ -521,11 +533,16 @@ class Registry(Container):
                 raise LoadImageError('%s:moving zipped to temp dir fail' % (self.ip))
             log.info('upload image tar package successfully, now try to load to local docker, it will takes a few minutes')
             command = 'tar xvzf %s' % (os.path.join(tempdir,os.path.basename(zipped_path)))
-            with cd(tempdir):
-                result = self.command_run(command)
-
-                if result.failed:
-                    raise LoadImageError("%s:untar fail"%(self.ip))
+            if self.local:
+                with lcd(tempdir):
+                    result = self.command_run(command)
+                    if result.failed:
+                        raise LoadImageError("%s:untar fail"%(self.ip))
+            else:
+                with cd(tempdir):
+                    result = self.command_run(command)
+                    if result.failed:
+                        raise LoadImageError("%s:untar fail"%(self.ip))
 
             zipped = (os.path.basename(zipped_path)).split('.')[0]
             temp_zipped = os.path.join(tempdir, zipped)
@@ -534,7 +551,7 @@ class Registry(Container):
             if result.failed:
                 raise LoadImageError("%s:list file fail"%(self.ip))
             else:
-                command = 'ls'
+                log.info('start to load images, please wait..')
                 for tfile in result.stdout.split():
                     command = 'docker load --input %s/%s'%(temp_zipped, tfile)
                     result = self.command_run(command)
@@ -549,6 +566,7 @@ class Registry(Container):
             result = self.command_run(command)
 
     def run_registry(self):
+        log.info('start to run registry')
         if self.name:
             command = 'docker run -d --restart=always -p %s:5000 --name %s -v %s:/var/lib/registry %s'%(self.port, self.name, self.store, self.image)
         else:
@@ -560,6 +578,7 @@ class Registry(Container):
             raise MyException('command \'%s\' run fail'%(command))
 
     def push_private_registry(self, images_file):
+        log.info('pushing images to private registry...wait a few minutes')
         if not os.path.exists(images_file):
             raise MyException('image list file does not exist')
 
@@ -568,7 +587,10 @@ class Registry(Container):
         if result.failed:
             raise MyException('get images failed')
         else:
-            dockerimages = result.stdout.strip().split('\r\n')
+            if self.local:
+                dockerimages = result.stdout.strip().split('\n')
+            else:
+                dockerimages = result.stdout.strip().split('\r\n')
 
         try:
             f = open(images_file, 'r')
@@ -599,11 +621,11 @@ class Registry(Container):
                         raise MyException(command+" fail")
                 #need some cleanup?
             except Exception, e:
-                raise MyException('read file failed:' + e)
+                raise MyException(str(e))
             finally:
                 f.close()
         except Exception, e:
-            raise MyException('open %s fail:'%(images_file)+str(e))
+            raise MyException('open %s fail:%s'%(images_file,str(e)))
 
 class RancherServer(Container):
  #   def __init__(self, registry_ip, registry_port, registry_password, ip, port, password):
@@ -657,7 +679,11 @@ class RancherServer(Container):
             logging.warn('can\'t get docker images')
         else:
             rancher_server_image = 'docker.io/%s'%(self.image)
-            for image in result.stdout.strip():
+            if self.local:
+                dockerimages =  result.stdout.strip().split('\n')
+            else:
+                dockerimages =  result.stdout.strip().split('\r\n')
+            for image in dockerimages:
                 if image == rancher_server_image:
                     log.debug('image[%s] exists, skipping pull'%(rancher_server_image))
                     return
@@ -720,7 +746,10 @@ class RegistryFrontend(Container):
             raise DockerListImageError
         else:
             frontend_image = 'docker.io/%s'%(self.image)
-            dockerimages = result.stdout.strip().split('\r\n')
+            if self.local:
+                dockerimages = result.stdout.strip().split('\n')
+            else:
+                dockerimages = result.stdout.strip().split('\r\n')
             for image in dockerimages:
                 if image == frontend_image:
                     log.info('image[%s] exists, skipping pull'%(frontend_image))
@@ -851,7 +880,10 @@ class RancherAgent(Container):
         else:
             agent_image = 'docker.io/%s'%(self.image)
             agent_instance_image = 'docker.io/rancher/agent-instance:v0.6.0'
-            dockerimages = result.stdout.strip().split('\r\n')
+            if self.local: 
+                dockerimages = result.stdout.strip().split('\n')
+            else:
+                dockerimages = result.stdout.strip().split('\r\n')
 
             e_agent = False
             e_instance = False
@@ -948,9 +980,12 @@ def main():
                     log.info('start to run registry ')
                     rg.run_registry()
                     rg.add_registry(rg.ip, rg.port)
+                    rg.restart_docker()
                     rg.push_private_registry(images_file)
                 else:
                     log.info('registry is running, push new images')
+                    rg.add_registry(rg.ip, rg.port)
+                    rg.restart_docker()
                     rg.push_private_registry(images_file)
                 break                    
             except (MyException, PortUsedError), e:
@@ -996,6 +1031,7 @@ def main():
                 rs.check_port_used()
                 rs.add_registry(rs.registry_ip,rs.registry_port)
                 rs.restart_docker()
+                rs.pull_image()
                 rs.run_server()
                 break
             except (MyException, PortUsedError), e:
