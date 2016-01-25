@@ -14,6 +14,7 @@ from docker import Client
 from fabric.api import *
 from fabric import exceptions
 import threading
+import time
 
 DEBUG=True
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - <%(levelname)s> - %(message)s')
@@ -60,6 +61,7 @@ class FabricSupport:
 
     def command_run(self, localflag ,command):
         if localflag:
+            log.debug('command:%s'%command)
             with settings(hide('warnings','stdout','stderr','running',),warn_only=True):
                 return local(command, capture=True)
         else:
@@ -97,9 +99,9 @@ class Container(FabricSupport):
         self.port = port
         self.password = password
             
-        if not self.password:
-            content='Enter the %s\'s password:'%(self.ip)
-            self.password = getpass.getpass(prompt=content)
+#        if not self.password:
+#            content='Enter the %s\'s password:'%(self.ip)
+#            self.password = getpass.getpass(prompt=content)
 
         if self.ip == get_hostip():
             self.local = True
@@ -113,7 +115,7 @@ class Container(FabricSupport):
     def move_file(self, src, dest):
         return FabricSupport.move_file(self, self.local, src,dest)
 
-    def check_host(self):
+    def check_host_bk(self):
         if self.local:
             return True
         else:
@@ -131,12 +133,38 @@ class Container(FabricSupport):
                 command = 'ls'
                 result = self.command_run(command)
                 if result.failed:  
-                    log.error('connect to \'%s\' fail'%self.ip)
+                    log.error('login  to \'%s\' fail'%self.ip)
                     return False
                 else:
                     log.info('login to \'%s\' success'%self.ip)
             return True
     #缺少端口,镜像名以及共享卷合法性认证
+    def check_host(self):
+        if self.local:
+            return
+        else:
+            i = 6 
+            while i:
+                try:
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(self.ip, 22, "root",self.password)
+                    return 
+                except paramiko.ssh_exception.AuthenticationException, e: 
+                    
+                    log.error(e)
+                    i = i-1
+                    if i == 0:
+                        raise MyException("Over 5 times input wrong password...")
+                    content = "please input \'%s\' correct password:"%(self.ip)
+                    self.password = getpass.getpass(content)
+
+                except Exception, e:
+                    raise MyException(str(e)) 
+                finally:
+                    ssh.close()
+            raise MyException("Over 5 times input wrong password...")
+
 
     def check_env(self):
         result = self.command_run('which docker') 
@@ -184,12 +212,12 @@ class Container(FabricSupport):
             pass
 
         try:
-            command = 'grep -e "^\s*#\+\s*INSECURE_REGISTRY" %s'%(docker_conf)
+            command = 'grep -e "^\s*INSECURE_REGISTRY" %s'%(docker_conf)
             result = self.command_run(command)
             if result.succeeded:
-                content = 'INSECURE_REGISTRY=\'--insecure-registry %s:%s\''%(registry_ip, registry_port)
-                log.debug('content:%s'%content)
-                command = 'sed -i "s/^\s*#\+\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
+                content = result.stdout.strip().rstrip('\'')+' --insecure-registry %s:%s\'' % (registry_ip, registry_port)
+                log.debug('2content:%s'%content)
+                command = 'sed -i "s/^\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
                 result = self.command_run(command)
                 if result.failed:
                     raise MyException('set docker private registry conf failed')
@@ -197,12 +225,12 @@ class Container(FabricSupport):
                     log.info('add private registry success')
                     return 
 
-            command = 'grep -e "^\s*INSECURE_REGISTRY" %s'%(docker_conf)
+            command = 'grep -e "^\s*#\+\s*INSECURE_REGISTRY" %s'%(docker_conf)
             result = self.command_run(command)
             if result.succeeded:
-                content = result.stdout.strip().rstrip('\'')+' --insecure-registry %s:%s\'' % (registry_ip, registry_port)
-                log.debug('2content:%s'%content)
-                command = 'sed -i "s/^\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
+                content = 'INSECURE_REGISTRY=\'--insecure-registry %s:%s\''%(registry_ip, registry_port)
+                log.debug('content:%s'%content)
+                command = 'sed -i "s/^\s*#\+\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
                 result = self.command_run(command)
                 if result.failed:
                     raise MyException('set docker private registry conf failed')
@@ -439,14 +467,15 @@ def setup_agent(conf_db, agents_conf, ip):
         raise MyException('invalid conf, check if missing some conf')
     try: 
         agent.check_command()
+        log.debug('agent command:%s'%(agent.command))
         agent.check_host()
         if agent.check_running():
+            log.info('agent is running, skip...')
             return  
         agent.check_port_used()
         agent.check_rancher_server()
         agent.check_registry()
         agent.add_registry(agent.registry_ip, agent.registry_port)
-        log.info('restart docker...')
         agent.restart_docker()
         log.info('pulling images...')
         agent.pull_image()
@@ -476,7 +505,6 @@ class Registry(Container):
         if not os.path.exists(images_file):
             raise ImageListNotExistError
 
-        log.info('start to load images..')
         command = 'docker images | awk \'{print $1":"$2}\''
         result = self.command_run(command)
         if result.failed:
@@ -496,27 +524,37 @@ class Registry(Container):
             if dockerimages: 
                 log.info('check if all image exist in local')
                 try:
+
                     f = open(images_file, 'r')
                     all_match_flag = True
                     for eachline in f:
                         li = eachline.strip()
+                        if li.startswith('#') or not li:
+                            continue
+                        log.debug('Imagelist:%s'%li)
                         match_flag = False
                         for j in dockerimages:
                             if j == li:
                                 match_flag = True
-                                all_match_flag = False
                                 break
                         if match_flag:
                             continue
+                        log.info('image %s not exist'%(li))
+                        all_match_flag = False
+                        break
+
+                    if all_match_flag:
                         log.info('all image exists, skip loading images') 
                         return
+                    else:
+                        log.info('some images don\'t exist in local,start to load image')
                 except Exception, e:
                     log.error('open %s fail:'%(images_file)+str(e))
                     sys.exit(1)
                 finally:
                     f.close()
             else:
-                log.debug('some images don\'t exist in local,start to load image')
+                log.info('some images don\'t exist in local,start to load image')
                 
         log.info('start to upload local image tar package, it will lasts a few minutes, please wait in patience....')
         try:
@@ -711,6 +749,16 @@ class RancherServer(Container):
         else:
             log.info('rancher server start to run..')
 
+    def restart_docker(self):
+        #registry is running ,it have already set conf, and restart docker daemon, don't need to do this again
+        if self.registry_ip == self.ip:
+            return
+        command = 'systemctl restart docker'
+        result = self.command_run(command)
+        if result.failed:
+            log.info('restart docker fail....')
+            sys.exit(1)
+
 class RegistryFrontend(Container):
     def __init__(self, ip, registry_ip, registry_port, port, name=None, password=None, registry_password=None):
         if not registry_ip or not registry_port:
@@ -793,6 +841,17 @@ class RegistryFrontend(Container):
                     return False
                 else:
                     return True
+
+    def restart_docker(self):
+        #registry is running ,it have already set conf, and restart docker daemon, don't need to do this again
+        if self.registry_ip == self.ip:
+            return
+        
+        command = 'systemctl restart docker'
+        result = self.command_run(command)
+        if result.failed:
+            log.info('restart docker fail....')
+            sys.exit(1)
 
 class RancherAgent(Container):
     def __init__(self, registry_ip, registry_port, server_ip, server_port, ip, add_host_command, registry_password=None, server_password=None, password=None):
@@ -936,6 +995,17 @@ class RancherAgent(Container):
         if result.failed:
             raise MyException('run \'%s\' fail'%self.command)
 
+    def restart_docker(self):
+        #registry is running ,it have already set conf, and restart docker daemon, don't need to do this again
+        if self.registry_ip == self.ip or self.server_ip == self.ip:
+            return
+        
+        command = 'systemctl restart docker'
+        result = self.command_run(command)
+        if result.failed:
+            log.info('restart docker fail....')
+            sys.exit(1)
+
         
 def main():
     script_dir_path =os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -1047,6 +1117,7 @@ def main():
                 rs.pull_image()
                 log.info('running server...')
                 rs.run_server()
+                time.sleep(3)
                 break
             except (MyException, PortUsedError), e:
                 log.error(e)
@@ -1168,6 +1239,8 @@ def main():
                 log.info('Adding agent finish')
                 break
                 '''
+                    if ip == 'rancher-server-command':
+                        continue
                     log.info('----------------------------')
                     log.info('setup agent in \'%s\'...', ip)
                     setup_agent(conf_db, agents_conf, ip)
