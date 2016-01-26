@@ -13,10 +13,17 @@ import shutil
 from docker import Client
 from fabric.api import *
 from fabric import exceptions
+import fabric
+
 import time
+from Crypto.Cipher import AES
+import base64
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - <%(levelname)s> - %(message)s')
 log = logging.getLogger(__name__)
+
+#for encrpyt
+_secret_key='1234567890123456'
 
 class ContainerParameterError(Exception):
     pass
@@ -343,37 +350,82 @@ def parse_conf(config_path):
 
     try:
         # rancher agent
-        if conf_db['registry_ip'] and not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_ip']):
+        if not conf_db['registry_i'] or  not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_ip']):
            raise MyException('Invalid conf argument \'%s\': must be ip address'%(conf_db['registry_ip'])) 
 
 
-        if conf_db['registry_port'] and not re.match(r'^\d*$', conf_db['registry_port']):
+        if not conf_db['registry_port'] or not re.match(r'^\d*$', conf_db['registry_port']):
            raise MyException('Invalid conf argument \'%s\': only digits'%(conf_db['registry_port'])) 
 
-        if conf_db['registry_store'] and not conf_db['registry_store'].startswith('/'):
+        if not conf_db['registry_store'] or not conf_db['registry_store'].startswith('/'):
            raise MyException('Invalid conf argument \'%s\': must be absolute path'%(conf_db['registry_store'])) 
 
         #rancher server
-        if conf_db['server_ip'] and not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['server_ip']):
+        if not conf_db['server_ip'] or not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['server_ip']):
            raise MyException('Invalid conf argument \'%s\': must be ip address'%(conf_db['server_ip'])) 
 
-        if conf_db['server_port'] and not re.match(r'^\d*$', conf_db['server_port']):
+        if not conf_db['server_port'] or not re.match(r'^\d*$', conf_db['server_port']):
            raise MyException('Invalid conf argument \'%s\': only digits'%(conf_db['server_port'])) 
 
         #registry frontend
 
-        if conf_db['registry_frontend_ip'] and not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_frontend_ip']):
+        if not conf_db['registry_frontend_ip'] or not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_frontend_ip']):
            raise MyException('Invalid conf argument \'%s\': must be ip address'%(conf_db['registry_frontend_ip'])) 
 
-        if conf_db['registry_frontend_port'] and not re.match(r'^\d*$', conf_db['registry_frontend_port']):
+        if not conf_db['registry_frontend_port'] or not re.match(r'^\d*$', conf_db['registry_frontend_port']):
            raise MyException('Invalid conf argument \'%s\': only digits'%(conf_db['registry_frontend_port'])) 
 
     except MyException, e:
         log.error(e)
         sys.exit(1)
 
-
     return conf_db
+
+def encrypt_password(password):
+    if not password:
+        raise MyException('invalid arg')
+    msg_text = password.rjust(32)
+    cipher = AES.new(_secret_key, AES.MODE_ECB)
+    encoded = base64.b64encode(cipher.encrypt(msg_text))
+    return encoded
+ 
+def decrypt_password(password_en):
+    if not password_en:
+        raise MyException('invalid arg')
+    ciper = AES.new(_secret_key, AES.MODE_ECB)
+    decoded = cipher.decrypt(base64.b64decode(password_en))
+    return decoded.strip()
+    
+
+def check_password(ip, password):
+    if not ip:
+        raise MyException('Invalid must not be empty')
+    if not password:
+        content = "please input \'%s\' password:"%(ip)
+        password = getpass.getpass(content)
+    i = 6 
+    while i:
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(ip, 22, "root", password)
+            return 
+        except paramiko.ssh_exception.AuthenticationException, e: 
+            log.error(e)
+            i = i-1
+            if i == 0:
+                raise MyException("Over 5 times input wrong password...")
+            content = "please input \'%s\' correct password:"%(ip)
+            password = getpass.getpass(content)
+
+        except Exception, e:
+            raise MyException(str(e)) 
+        finally:
+            ssh.close()
+    if i <= 0:
+        raise MyException("Over 5 times input wrong password...")
+    else:
+        return password
 
 def parse_agent_conf(config_path):
     if os.path.exists(config_path):
@@ -695,10 +747,10 @@ class RancherServer(Container):
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
                 result = local(command)
                 if result.failed:
-                    log.error('registry is not running')
-                    return False
+                    raise MyException('registry is not running')
                 else:
-                    return True
+                    log.info('check registry success') 
+                    return
         else:
             log.info('now check registry is running ?')
             i = 6
@@ -727,10 +779,10 @@ class RancherServer(Container):
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
                 result = run(command)
                 if result.failed:
-                    log.error('registry is not running')
-                    return False
+                    raise MyException('registry is not running')
                 else:
-                    return True
+                    log.info('check registry success') 
+                    return 
 
     def pull_image(self):
         command = 'docker images | awk \'{print $1":"$2}\'' 
@@ -849,10 +901,10 @@ class RegistryFrontend(Container):
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
                 result = local(command)
                 if result.failed:
-                    log.error('registry is not running')
-                    return False
+                    raise MyException('registry is not running')
                 else:
-                    return True
+                    log.info('check registry success')
+                    return 
         else:
             log.info('now check registry is running ?')
             i = 6
@@ -882,10 +934,10 @@ class RegistryFrontend(Container):
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
                 result = run(command)
                 if result.failed:
-                    log.error('registry is not running')
-                    return False
+                    raise MyException('registry is not running')
                 else:
-                    return True
+                    log.info('check registry success')
+                    return 
 
     def restart_docker(self):
         #registry is running ,it have already set conf, and restart docker daemon, don't need to do this again
@@ -937,6 +989,7 @@ class RancherAgent(Container):
                     raise MyException('registry is not running')
                 else:
                     log.info('check registry success')
+                    return
         else:
             log.info('now check registry is running ?')
             i = 6
@@ -969,6 +1022,7 @@ class RancherAgent(Container):
                     raise MyException('registry is not running')
                 else:
                     log.info('check registry success')
+                    return
             
     def check_rancher_server(self):
         command = 'docker ps | awk \'{print $2}\' | grep %s:%s/rancher/server:latest'%(self.registry_ip, self.registry_port)
@@ -1315,5 +1369,3 @@ def main():
             
 if __name__ == '__main__':
     main()
-
-   
