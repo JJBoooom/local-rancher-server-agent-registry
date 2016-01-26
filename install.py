@@ -351,29 +351,29 @@ def parse_conf(config_path):
     try:
         # rancher agent
         if not conf_db['registry_ip'] or  not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_ip']):
-           raise MyException('Invalid conf argument \'%s\': must be ip address'%(conf_db['registry_ip'])) 
+           raise MyException('Invalid conf argument \'%s\': not ip address or empty'%(conf_db['registry_ip'])) 
 
 
         if not conf_db['registry_port'] or not re.match(r'^\d*$', conf_db['registry_port']):
-           raise MyException('Invalid conf argument \'%s\': only digits'%(conf_db['registry_port'])) 
+           raise MyException('Invalid conf argument \'%s\': not digits or empty'%(conf_db['registry_port'])) 
 
         if not conf_db['registry_store'] or not conf_db['registry_store'].startswith('/'):
-           raise MyException('Invalid conf argument \'%s\': must be absolute path'%(conf_db['registry_store'])) 
+           raise MyException('Invalid conf argument \'%s\':not absolute path or empty'%(conf_db['registry_store'])) 
 
         #rancher server
         if not conf_db['server_ip'] or not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['server_ip']):
-           raise MyException('Invalid conf argument \'%s\': must be ip address'%(conf_db['server_ip'])) 
+           raise MyException('Invalid conf argument \'%s\': not ip address or empty'%(conf_db['server_ip'])) 
 
         if not conf_db['server_port'] or not re.match(r'^\d*$', conf_db['server_port']):
-           raise MyException('Invalid conf argument \'%s\': only digits'%(conf_db['server_port'])) 
+           raise MyException('Invalid conf argument \'%s\':no digits or empty'%(conf_db['server_port'])) 
 
         #registry frontend
 
         if not conf_db['registry_frontend_ip'] or not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_frontend_ip']):
-           raise MyException('Invalid conf argument \'%s\': must be ip address'%(conf_db['registry_frontend_ip'])) 
+           raise MyException('Invalid conf argument \'%s\': not ip address or empty'%(conf_db['registry_frontend_ip'])) 
 
         if not conf_db['registry_frontend_port'] or not re.match(r'^\d*$', conf_db['registry_frontend_port']):
-           raise MyException('Invalid conf argument \'%s\': only digits'%(conf_db['registry_frontend_port'])) 
+           raise MyException('Invalid conf argument \'%s\': not  digits or empty'%(conf_db['registry_frontend_port'])) 
 
     except MyException, e:
         log.error(e)
@@ -1047,7 +1047,7 @@ class RancherAgent(Container):
                     if i == 0:
                         raise MyException("Over 5 times input wrong password...")
                     content = "please input server \'%s\' correct password:"%(self.server_ip)
-                    self.password = getpass.getpass(content)
+                    self.server_password = getpass.getpass(content)
 
                 except Exception, e:
                     raise MyException(str(e)) 
