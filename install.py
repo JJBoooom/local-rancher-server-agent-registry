@@ -350,7 +350,7 @@ def parse_conf(config_path):
 
     try:
         # rancher agent
-        if not conf_db['registry_i'] or  not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_ip']):
+        if not conf_db['registry_ip'] or  not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_ip']):
            raise MyException('Invalid conf argument \'%s\': must be ip address'%(conf_db['registry_ip'])) 
 
 
