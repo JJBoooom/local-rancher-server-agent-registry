@@ -13,10 +13,8 @@ import shutil
 from docker import Client
 from fabric.api import *
 from fabric import exceptions
-import threading
 import time
 
-DEBUG=True
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - <%(levelname)s> - %(message)s')
 log = logging.getLogger(__name__)
 
@@ -470,16 +468,18 @@ def setup_agent(conf_db, agents_conf, ip):
         log.debug('agent command:%s'%(agent.command))
         agent.check_host()
         if agent.check_running():
-            log.info('agent is running, skip...')
+            log.info('\'ip\'agent is running, skip...')
             return  
         agent.check_port_used()
+        log.debug('\'%s\'agent check port succeeded'%(agent.ip))
         agent.check_rancher_server()
+        log.debug('\'%s\'agent check port succeeded'%(agent.ip))
         agent.check_registry()
         agent.add_registry(agent.registry_ip, agent.registry_port)
         agent.restart_docker()
-        log.info('pulling images...')
+        log.info('\'%s\'pulling images...'%(agent.ip))
         agent.pull_image()
-        log.info('running agent...')
+        log.info('\'%s\'running agent...'%(agent.ip))
         agent.run_agent()
     except MyException, e:
         raise MyException(str(e))
@@ -700,6 +700,28 @@ class RancherServer(Container):
                 else:
                     return True
         else:
+            log.info('now check registry is running ?')
+            i = 6
+            while i:
+                try:
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(self.registry_ip, 22, "root",self.registry_password)
+                    return 
+                except paramiko.ssh_exception.AuthenticationException, e: 
+                    log.error(e)
+                    i = i-1
+                    if i == 0:
+                        raise MyException("Over 5 times input wrong password...")
+                    content = "please input registry \'%s\' correct password:"%(self.registry_ip)
+                    self.registry_password = getpass.getpass(content)
+
+                except Exception, e:
+                    raise MyException(str(e)) 
+                finally:
+                    ssh.close()
+            if i <= 0:
+                raise MyException("Over 5 times input wrong password...")
             env.host_string = "%s:%s"%(self.registry_ip ,22) 
             env.password = self.registry_password
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
@@ -832,6 +854,29 @@ class RegistryFrontend(Container):
                 else:
                     return True
         else:
+            log.info('now check registry is running ?')
+            i = 6
+            while i:
+                try:
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(self.registry_ip, 22, "root",self.registry_password)
+                    return 
+                except paramiko.ssh_exception.AuthenticationException, e: 
+                    log.error(e)
+                    i = i-1
+                    if i == 0:
+                        raise MyException("Over 5 times input wrong password...")
+                    content = "please input registry \'%s\' correct password:"%(self.registry_ip)
+                    self.registry_password = getpass.getpass(content)
+
+                except Exception, e:
+                    raise MyException(str(e)) 
+                finally:
+                    ssh.close()
+            if i <= 0:
+                raise MyException("Over 5 times input wrong password...")
+
             env.host_string = "%s:%s"%(self.registry_ip ,22) 
             env.password = self.registry_password
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
@@ -893,6 +938,29 @@ class RancherAgent(Container):
                 else:
                     log.info('check registry success')
         else:
+            log.info('now check registry is running ?')
+            i = 6
+            while i:
+                try:
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(self.registry_ip, 22, "root",self.registry_password)
+                    return 
+                except paramiko.ssh_exception.AuthenticationException, e: 
+                    log.error(e)
+                    i = i-1
+                    if i == 0:
+                        raise MyException("Over 5 times input wrong password...")
+                    content = "please input registry \'%s\' correct password:"%(self.registry_ip)
+                    self.registry_password = getpass.getpass(content)
+
+                except Exception, e:
+                    raise MyException(str(e)) 
+                finally:
+                    ssh.close()
+            if i <= 0:
+                raise MyException("Over 5 times input wrong password...")
+
             env.host_string = "%s:%s"%(self.registry_ip ,22) 
             env.password = self.registry_password
             with settings(hide('stdout','stderr','running','warnings'),warn_only=True):
@@ -912,6 +980,28 @@ class RancherAgent(Container):
                 else:
                     log.info('check rancher server success')
         else:
+            i = 6
+            while i:
+                try:
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    ssh.connect(self.server_ip, 22, "root",self.server_password)
+                    return 
+                except paramiko.ssh_exception.AuthenticationException, e: 
+                    log.error(e)
+                    i = i-1
+                    if i == 0:
+                        raise MyException("Over 5 times input wrong password...")
+                    content = "please input server \'%s\' correct password:"%(self.server_ip)
+                    self.password = getpass.getpass(content)
+
+                except Exception, e:
+                    raise MyException(str(e)) 
+                finally:
+                    ssh.close()
+            if i <= 0:
+                raise MyException("Over 5 times input wrong password...")
+
             env.host_string = "%s:%s"%(self.server_ip ,22) 
             env.password = self.server_password
             with settings(hide('running','warnings','stdout','stderr'),warn_only=True):
@@ -1205,40 +1295,7 @@ def main():
                 sys.exit(1)
 
             try:
-                threads = []
-                aips = []
                 for ip in agents_conf.keys():
-                    deprecated='''
-
-
-                    if ip != 'rancher-server-command':
-          #              t = threading.Thread(target=setup_agent, args=(conf_db, agents_conf, ip, ))
-  #                      t = MyThread(target=setup_agent, args=(conf_db, agents_conf, ip, ))
-  #                      t.daemon = True
-  #                      t.start()
-  #                      threads.append(t)
-  #                      aips.append(ip)
-
-          #      for t in threads:
-          #          t.join()
-                while True:
-                    
-                    onealive = False
-                    time.sleep(100)
-                    for t in threads:
-                        if t.isAlive:
-                            onealive = True
-                    if not onealive :
-                        break
-                    
-                for i in range(len(threads)):
-                    if threads[i].err:
-                        log.error('Agent \'%s\' setup failed:%s', aips[i], threads[i].err )
-                    else:
-                        log.info('Agent \'%s\' setup success!', aips[i])
-                log.info('Adding agent finish')
-                break
-                '''
                     if ip == 'rancher-server-command':
                         continue
                     log.info('----------------------------')
@@ -1253,6 +1310,7 @@ def main():
             log.info('Adding agent finish')
             logging.shutdown()
             break
+    fabric.network.disconnect_all()
 
             
 if __name__ == '__main__':
