@@ -1184,6 +1184,10 @@ def main():
     images_file = script_dir_path+'/imagelists'
     log.info("loading config from "+config_path)
 
+
+    #用于避免多次输入密码
+    registry_install=False
+    server_install=False
     conf_db = parse_conf(config_path)
     while True:
         try:
@@ -1202,13 +1206,12 @@ def main():
             break
         else:
             log.info("private registry installing...")
+            registry_install = True
             try:
                 log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
                 pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
                 conf_db['registry_password'] = pw
                 log.info('registry password check success')
-                log.info('--------------------')
-                log.debug('registry_password:%s'%(conf_db['registry_password']))
             except Exception, e:
                 log.error(e)
                 logging.shutdown()
@@ -1264,15 +1267,21 @@ def main():
             logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
-            log.info("cancel rancher server install.")
+            log.info("cancel rancher server installation")
             break
         else:
             log.info("rancher server installing...")
+            server_install = True
             try: 
+                if not registry_install:
+                    log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
+                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
+                    conf_db['registry_password'] = pw
+                    log.info('registry password check success')
                 log.info('check rancher server \'%s\' password:' %(conf_db['server_ip']) )
                 pw = check_password(conf_db['server_ip'], conf_db['server_password'])
                 conf_db['server_password'] = pw
-                log.info('rancher server password  check success')
+                log.info('rancher server password check success')
             except Exception, e:
                 log.error(e)
                 logging.shutdown()
@@ -1332,6 +1341,12 @@ def main():
         else:
             log.info("registry frontend installing...")
             try:
+                if not registry_install:
+                    log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
+                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
+                    conf_db['registry_password'] = pw
+                    log.info('registry password check success')
+                    
                 log.info('check registry frontend  \'%s\' password:' %(conf_db['registry_frontend_ip']) )
                 pw = check_password(conf_db['registry_frontend_ip'], conf_db['registry_frontend_password'])
                 conf_db['registry_frontend_password'] = pw
@@ -1398,6 +1413,21 @@ def main():
             break
         else:
             log.info("rancher agent is installing...")
+            try:
+                if not registry_install:
+                    log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
+                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
+                    conf_db['registry_password'] = pw
+                    log.info('registry password check success')
+                if not server_install:
+                    log.info('check registry \'%s\' password:' %(conf_db['server_ip']) )
+                    pw = check_password(conf_db['server_ip'], conf_db['server_password'])
+                    conf_db['server_password'] = pw
+                    log.info('rancher server  password check success')
+            except Exception, e:
+                log.error(e)
+                logging.shutdown()
+                sys.exit(1)
     
             try:
                 agents_conf = parse_agent_conf(config_path)
