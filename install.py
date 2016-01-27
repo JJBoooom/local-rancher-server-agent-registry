@@ -8,8 +8,6 @@ import ConfigParser
 import paramiko
 import getpass
 import re
-import tempfile
-import shutil
 from docker import Client
 from fabric.api import *
 from fabric import exceptions
@@ -18,6 +16,7 @@ import fabric
 import time
 from Crypto.Cipher import AES
 import base64
+import getopt
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - <%(levelname)s> - %(message)s')
 log = logging.getLogger(__name__)
@@ -65,8 +64,8 @@ class FabricSupport:
         self.password = password
 
     def command_run(self, localflag ,command):
+        log.debug('command:%s'%command)
         if localflag:
-            log.debug('command:%s'%command)
             with settings(hide('warnings','stdout','stderr','running',),warn_only=True):
                 return local(command, capture=True)
         else:
@@ -80,6 +79,7 @@ class FabricSupport:
             
 
     def move_file(self, localflag, src, dest):
+        log.debug('move file:%s---->%s'%(src, dest))
         if localflag:
             with settings(hide('warnings','stdout','stderr','running',),warn_only=True):
                 return local('cp -rf %s %s'%(src, dest),capture=True)
@@ -154,6 +154,7 @@ class Container(FabricSupport):
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                     ssh.connect(self.ip, 22, "root",self.password)
+                    log.info('check host success')
                     return 
                 except paramiko.ssh_exception.AuthenticationException, e: 
                     
@@ -184,6 +185,7 @@ class Container(FabricSupport):
             else:
                 raise MyException('cancel to start docker daemon')
         else:
+            log.debug('docker version:%s'%(result.stdout))
             log.info('check docker enviroment success')
 
     def check_running(self):
@@ -192,9 +194,11 @@ class Container(FabricSupport):
         log.debug(command)
         result = self.command_run(command)
         if result.failed:
-           return False
+            return False
         else:
-           return True
+            log.debug("running:%s"%result.stdout)
+            return True
+
 
     def check_port_used(self):
         if int(self.port) < 0 or int(self.port) > 65535:
@@ -204,6 +208,7 @@ class Container(FabricSupport):
         if result.failed:
             log.info('Port[%s] is available'%(self.port))
         else:
+            log.debug('port is used:%s'%(result.stdout))
             raise  PortUsedError('port is used', self.port)
 
     def add_registry(self, registry_ip, registry_port):
@@ -211,6 +216,7 @@ class Container(FabricSupport):
         command = 'grep -e "^\s*INSECURE_REGISTRY.*--insecure-registry\s*%s:%s" %s'%(registry_ip, registry_port, docker_conf)
         result = self.command_run(command)
         if result.succeeded:
+            log.debug('add_registry:%s'%(result.stdout))
             log.info('add private registry success')
             return
         else:
@@ -880,8 +886,7 @@ class RegistryFrontend(Container):
         command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
         result = self.command_run(command)
         if result.failed:
-            sys.exit(1)
-
+            raise MyException('pull images failed')
         #need to add check for images.existence
         tag_image = 'docker.io/%s'%(self.image)
         for j in dockerimages:
@@ -892,7 +897,7 @@ class RegistryFrontend(Container):
                 command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
                 result = self.command_run(command)
                 if result.failed:
-                    sys.exit(1)
+                    raise MyException('tag %s:%s/%s images failed'%(self.registry_ip, self.registry_port, self.image))
 
     def check_registry(self):
         #command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
@@ -913,7 +918,7 @@ class RegistryFrontend(Container):
                     ssh = paramiko.SSHClient()
                     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                     ssh.connect(self.registry_ip, 22, "root",self.registry_password)
-                    return 
+                    break 
                 except paramiko.ssh_exception.AuthenticationException, e: 
                     log.error(e)
                     i = i-1
@@ -1152,6 +1157,15 @@ class RancherAgent(Container):
 
         
 def main():
+
+    try:
+        opts, args = getopt.getopt(sys.argv[1:], 'd',['debug'])
+        for opt, arg in opts:
+            if opt in ('-d', '--debug'):
+                log.setLevel(logging.DEBUG)
+    except get.GetoptError:
+        log.debug('invalid option, use default')
+
     script_dir_path =os.path.abspath(os.path.dirname(sys.argv[0]))
     config_path = script_dir_path+'/conf'
     zipped_path = script_dir_path+'/images_zipped.tar.gz'
@@ -1310,7 +1324,10 @@ def main():
                 rf.check_registry()
                 rf.add_registry(rf.registry_ip, rf.registry_port)
                 log.info('restart docker...')
-                rf.restart_docker()
+                if conf_db['server_ip'] == rf.ip:
+                    log.debug('server and registry in some server, skip restart docker to avoid breaking server\'s running')
+                else:
+                    rf.restart_docker()
                 log.info('pulling image..')
                 rf.pull_image()
                 log.info('running registry frontend')
