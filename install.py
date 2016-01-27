@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 
 #for encrpyt
 _secret_key='1234567890123456'
+DEBUG=False
 
 class ContainerParameterError(Exception):
     pass
@@ -65,6 +66,7 @@ class FabricSupport:
 
     def command_run(self, localflag ,command):
         log.debug('command:%s'%command)
+
         if localflag:
             with settings(hide('warnings','stdout','stderr','running',),warn_only=True):
                 return local(command, capture=True)
@@ -120,30 +122,6 @@ class Container(FabricSupport):
     def move_file(self, src, dest):
         return FabricSupport.move_file(self, self.local, src,dest)
 
-    def check_host_bk(self):
-        if self.local:
-            return True
-        else:
-            command = 'ping %s -c 3 >/dev/null'%(self.ip)
-            with settings(
-            hide('warnings','stdout','stderr','running'),
-            warn_only=True):
-                result = local(command)
-            if result.failed:
-                log.error('\'%s\' connection not reach'%(self.ip))
-                return False
-            else:
-            #purpose: check password. need accurate method
-                log.info('Connect to \'%s\' success...'%(self.ip))
-                command = 'ls'
-                result = self.command_run(command)
-                if result.failed:  
-                    log.error('login  to \'%s\' fail'%self.ip)
-                    return False
-                else:
-                    log.info('login to \'%s\' success'%self.ip)
-            return True
-    #缺少端口,镜像名以及共享卷合法性认证
     def check_host(self):
         if self.local:
             return
@@ -271,277 +249,11 @@ class Container(FabricSupport):
         
     def restart_docker(self):
         command = 'systemctl restart docker'
-        result = self.command_run(command)
+        result = self.command_run(command) 
         if result.failed:
             log.info('restart docker fail....')
             sys.exit(1)
               
-           
-def confirm(msg):
-    while True:
-        try:
-            choose = raw_input(msg+"Y/N").strip()[0].lower() 
-        except (EOFError,KeyboardInterrupt,IndexError):
-            choose = 'q'
-        if choose == 'y':
-            return True
-        elif choose == 'n':
-            return False
-        elif choose == 'q':
-            sys.exit(1)
-        else:
-            pass
-       
-def get_hostip():
-    try:
-        hostip = subprocess.check_output(["/bin/sh", "-c", 'ip route show | grep "192.168" | grep "metric" | grep -v "default" | awk \'{print $9}\'']).strip('\n')
-        if not hostip:
-            log.error('can\'t get local host ip')
-            sys.exit(1)
-
-        return hostip
-    except Exception,e:
-        log.error("Can not get host ip:"+str(e))
-        sys.exit(1)
-
-# delete the '' or "" of a string
-def clean_str(var):
-    del_commas = ['\'', '\"']
-
-    if not var:
-        return var
-    for i in del_commas:
-        if var.startswith(i) and var.endswith(i):
-            return var.lstrip(i).rstrip(i)
-    return var
-
-
-def parse_conf(config_path):
-    if os.path.exists(config_path):
-        pass
-    else:
-        log.error('missing config file')
-        sys.exit(1)
-
-    conf_db = {}
-    try:
-        config = ConfigParser.RawConfigParser()
-        config.read(config_path)
-
-    except Exception, e: 
-        log.error(e)
-        sys.exit(1)
-
-    try:
-        section = 'REGISTRY'
-        conf_db['registry_ip'] = clean_str(config.get(section,'ip'))
-        conf_db['registry_port'] = clean_str(config.get(section,'port'))
-        conf_db['registry_name'] = clean_str(config.get(section,'name'))
-        conf_db['registry_store'] = clean_str(config.get(section,'store'))
-        conf_db['registry_password'] = clean_str(config.get(section, 'password'))
-
-        section = 'SERVER'
-        conf_db['server_ip'] = clean_str(config.get(section,'ip'))
-        conf_db['server_port'] = clean_str(config.get(section, 'port'))
-        conf_db['server_password'] = clean_str(config.get(section, 'password'))
-
-        section = 'REGISTRY_FRONTEND'
-        conf_db['registry_frontend_ip'] = clean_str(config.get(section,'ip'))
-        conf_db['registry_frontend_password'] = clean_str(config.get(section, 'password'))
-        conf_db['registry_frontend_name'] = clean_str(config.get(section, 'name'))
-        conf_db['registry_frontend_port'] = clean_str(config.get(section, 'port'))
-    except ConfigParser.NoOptionError, e:
-        log.error(str(e)+":Please make sure sections/options in your conf correct")
-        sys.exit(1)
-
-    try:
-        # rancher agent
-        if not conf_db['registry_ip'] or  not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_ip']):
-           raise MyException('Invalid conf argument \'%s\': not ip address or empty'%(conf_db['registry_ip'])) 
-
-
-        if not conf_db['registry_port'] or not re.match(r'^\d*$', conf_db['registry_port']):
-           raise MyException('Invalid conf argument \'%s\': not digits or empty'%(conf_db['registry_port'])) 
-
-        if not conf_db['registry_store'] or not conf_db['registry_store'].startswith('/'):
-           raise MyException('Invalid conf argument \'%s\':not absolute path or empty'%(conf_db['registry_store'])) 
-
-        #rancher server
-        if not conf_db['server_ip'] or not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['server_ip']):
-           raise MyException('Invalid conf argument \'%s\': not ip address or empty'%(conf_db['server_ip'])) 
-
-        if not conf_db['server_port'] or not re.match(r'^\d*$', conf_db['server_port']):
-           raise MyException('Invalid conf argument \'%s\':no digits or empty'%(conf_db['server_port'])) 
-
-        #registry frontend
-
-        if not conf_db['registry_frontend_ip'] or not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_frontend_ip']):
-           raise MyException('Invalid conf argument \'%s\': not ip address or empty'%(conf_db['registry_frontend_ip'])) 
-
-        if not conf_db['registry_frontend_port'] or not re.match(r'^\d*$', conf_db['registry_frontend_port']):
-           raise MyException('Invalid conf argument \'%s\': not  digits or empty'%(conf_db['registry_frontend_port'])) 
-
-    except MyException, e:
-        log.error(e)
-        sys.exit(1)
-
-    return conf_db
-
-def encrypt_password(password):
-    if not password:
-        raise MyException('invalid arg')
-    msg_text = password.rjust(32)
-    cipher = AES.new(_secret_key, AES.MODE_ECB)
-    encoded = base64.b64encode(cipher.encrypt(msg_text))
-    return encoded
- 
-def decrypt_password(password_en):
-    if not password_en:
-        raise MyException('invalid arg')
-    ciper = AES.new(_secret_key, AES.MODE_ECB)
-    decoded = cipher.decrypt(base64.b64decode(password_en))
-    return decoded.strip()
-    
-
-def check_password(ip, password):
-    if not ip:
-        raise MyException('Invalid must not be empty')
-    if not password:
-        content = "please input \'%s\' password:"%(ip)
-        password = getpass.getpass(content)
-    i = 6 
-    while i:
-        try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(ip, 22, "root", password)
-            return 
-        except paramiko.ssh_exception.AuthenticationException, e: 
-            log.error(e)
-            i = i-1
-            if i == 0:
-                raise MyException("Over 5 times input wrong password...")
-            content = "please input \'%s\' correct password:"%(ip)
-            password = getpass.getpass(content)
-
-        except Exception, e:
-            raise MyException(str(e)) 
-        finally:
-            ssh.close()
-    if i <= 0:
-        raise MyException("Over 5 times input wrong password...")
-    else:
-        return password
-
-def parse_agent_conf(config_path):
-    if os.path.exists(config_path):
-        pass
-    else:
-        log.error('missing config file')
-        sys.exit(1)
-    try:
-
-        config = ConfigParser.RawConfigParser()
-        config.read(config_path)
-
-    except Exception, e: 
-        log.error(e)
-        sys.exit(1)
-
-    conf_db = {}
-    agents_conf = {}
-    ips = {}
-    pws = {}
-
-    section = 'AGENT'
-    for options in config.options(section):
-        if options == 'rancher-server-command':
-            if not config.get(section, options):
-                raise MyException('Must set rancher-server-command option, get it from rancher server web page > ADD HOST PAGE')
-            agents_conf[options]= clean_str(config.get(section, options))
-        if options.startswith('ip'):
-       #skip duplicate ips
-       #Note: ConfigParser will auto filter duplicate option, and choose the last option's value
-            #if ips.has_key(options):
-            #   print 'skip duplicate option:'+options
-            #    continue
-            ipaddr = clean_str(config.get(section, options))
-            if ipaddr:
-                ips[options] = ipaddr
-                if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',ipaddr):
-                    raise MyException('Invalid conf argument \'%s\': must be ip address'%(ipaddr)) 
-
-            else:
-                log.info('skip EMPTY option:%s'%(options))
-        if options.startswith('password'):
-            password = clean_str(config.get(section, options))
-            pws[options] = password
-                
-    for ipkey in ips.keys():
-        if agents_conf.has_key(ips[ipkey]):
-            log.info('skip duplicate host:%s'%(ips[ipkey]))
-            continue
-        agents_conf[ips[ipkey]]=''
-        ipindex = ipkey.replace('ip', '')
-        for pwkey in pws.keys():
-            if ipindex == pwkey.replace('password', ''):
-                agents_conf[ips[ipkey]] = pws[pwkey]
-                break
-
-        for agentkey in agents_conf.keys():
-            if not agents_conf[agentkey]:
-                content='Enter the %s\'s password:'%(agentkey)
-                agents_conf[agentkey]= getpass.getpass(prompt=content)
-
-    if len(agents_conf) == 1 and 'rancher-server-command' in agents_conf:
-        raise MyException('Agents:missing ip/password pair')
-
-    return agents_conf
-
-def list_registry():
-    command = 'docker images | awk \'{print $1":"$2}\''
-
-#获取所有镜像
-def list_container(image):
-    command = 'docker ps | awk \'{print $2}\''
-
-
-def setup_agent(conf_db, agents_conf, ip):
-    
-    try:
-        agent = RancherAgent(registry_ip=conf_db['registry_ip'], 
-                             registry_port=conf_db['registry_port'], 
-                             registry_password=conf_db['registry_password'],
-                             server_ip=conf_db['server_ip'],
-                             server_port=conf_db['server_port'],
-                             server_password=conf_db['server_password'],
-                             ip=ip,
-                             password=agents_conf[ip],
-                             add_host_command=agents_conf['rancher-server-command']
-                         )
-    except ContainerParameterError:
-        raise MyException('invalid conf, check if missing some conf')
-    try: 
-        agent.check_command()
-        log.debug('agent command:%s'%(agent.command))
-        agent.check_host()
-        if agent.check_running():
-            log.info('\'ip\'agent is running, skip...')
-            return  
-        agent.check_port_used()
-        log.debug('\'%s\'agent check port succeeded'%(agent.ip))
-        agent.check_rancher_server()
-        log.debug('\'%s\'agent check port succeeded'%(agent.ip))
-        agent.check_registry()
-        agent.add_registry(agent.registry_ip, agent.registry_port)
-        agent.restart_docker()
-        log.info('\'%s\'pulling images...'%(agent.ip))
-        agent.pull_image()
-        log.info('\'%s\'running agent...'%(agent.ip))
-        agent.run_agent()
-    except MyException, e:
-        raise MyException(str(e))
-
 
 
 class Registry(Container):
@@ -558,16 +270,15 @@ class Registry(Container):
     #def __init__(self, ip, image, port,password=None):
     def load_images(self, zipped_path, images_file):
         if not os.path.exists(zipped_path):
-            raise ImageZippedNotExistError
+            raise MyException('%s not exist'%(zipped_path))
         
         if not os.path.exists(images_file):
-            raise ImageListNotExistError
+            raise MyException('%s not exist'%(images_file))
 
         command = 'docker images | awk \'{print $1":"$2}\''
         result = self.command_run(command)
         if result.failed:
-            log.error('get images failed')
-            sys.exit(1)
+            raise MyException('get images failed')
         else:
             if self.local:
                 dockerimages = result.stdout.strip().split('\n')
@@ -618,6 +329,7 @@ class Registry(Container):
         try:
             tempdir = ''
             command = 'mktemp -d /tmp/zipped.XXXXXXX'
+          #  command = 'mktemp -d /var/test/zipped.XXXXXXX'
             result = self.command_run(command)
           
             if not result.failed:
@@ -634,12 +346,14 @@ class Registry(Container):
                 with lcd(tempdir):
                     result = self.command_run(command)
                     if result.failed:
-                        raise LoadImageError("%s:untar fail"%(self.ip))
+                        raise LoadImageError("%s:local untar fail"%(self.ip))
+                    else:
+                        log.debug('untar success')
             else:
                 with cd(tempdir):
                     result = self.command_run(command)
                     if result.failed:
-                        raise LoadImageError("%s:untar fail"%(self.ip))
+                        raise LoadImageError("%s:remote untar fail"%(self.ip))
 
             zipped = (os.path.basename(zipped_path)).split('.')[0]
             temp_zipped = os.path.join(tempdir, zipped)
@@ -796,32 +510,34 @@ class RancherServer(Container):
         if result.failed:
             logging.warn('can\'t get docker images')
         else:
+            need_pull = True
             rancher_server_image = 'docker.io/%s'%(self.image)
+            registry_rancher_server_image = '%s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
             if self.local:
                 dockerimages =  result.stdout.strip().split('\n')
             else:
                 dockerimages =  result.stdout.strip().split('\r\n')
             for image in dockerimages:
                 if image == rancher_server_image:
-                    log.debug('image[%s] exists, skipping pull'%(rancher_server_image))
+                    log.info('image[%s] exists, skipping pull'%(rancher_server_image))
                     return
+                if image == registry_rancher_server_image:
+                    log.debug('image[%s] exists, skipping pull, need tag'%(registry_rancher_server_image))
+                    need_pull = False
 
-        command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
-        result = self.command_run(command)
-        if result.failed:
-            sys.exit(1)
+            if need_pull:
+                command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
+                result = self.command_run(command)
+                if result.failed:
+                    raise MyException('%s fail'%(command))
 
-        #need to add check for images.existence
-        command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
-        result = self.command_run(command)
-        if result.failed:
-            sys.exit(1)
+            #need to add check for images.existence
+            command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
+            result = self.command_run(command)
+            if result.failed:
+                    raise MyException('%s fail'%(command))
 
     def run_server(self):
-        command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
-        result = self.command_run(command)
-        if result.failed:
-            raise MyException('pull image fail')
         command = 'docker run -d --restart=always -p %s:8080 %s:%s/%s' % (self.port, self.registry_ip, self.registry_port, self.image)
         result = self.command_run(command)
         if result.failed:
@@ -873,7 +589,10 @@ class RegistryFrontend(Container):
         if result.failed:
             raise DockerListImageError
         else:
+            need_pull = True
             frontend_image = 'docker.io/%s'%(self.image)
+            
+            registry_frontend_image = '%s:%s/%s'%(self.ip, self.port,self.image)
             if self.local:
                 dockerimages = result.stdout.strip().split('\n')
             else:
@@ -882,22 +601,29 @@ class RegistryFrontend(Container):
                 if image == frontend_image:
                     log.info('image[%s] exists, skipping pull'%(frontend_image))
                     return
-        #增加镜像是否存在的判断
-        command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
-        result = self.command_run(command)
-        if result.failed:
-            raise MyException('pull images failed')
-        #need to add check for images.existence
-        tag_image = 'docker.io/%s'%(self.image)
-        for j in dockerimages:
-            if j == self.image:
-                log.info('%s exist, skip tag'%(self.image))
-                return 
-            else:
-                command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
+                if image == registry_frontend_image:
+                    log.debug('image[%s] exists, skipping pull, but need tag'%(registry_frontend_image))
+                    need_pull = False
+
+                    
+            #增加镜像是否存在的判断
+            if need_pull: 
+                command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
                 result = self.command_run(command)
                 if result.failed:
-                    raise MyException('tag %s:%s/%s images failed'%(self.registry_ip, self.registry_port, self.image))
+                    raise MyException('pull images failed')
+            #need to add check for images.existence
+            tag_image = 'docker.io/%s'%(self.image)
+            for j in dockerimages:
+                log.debug('image to match:%s --->%s'% (j, tag_image))
+                if j == tag_image:
+                    log.info('%s exist, skip tag'%(tag_image))
+                    return 
+
+            command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
+            result = self.command_run(command)
+            if result.failed:
+                raise MyException('tag %s:%s/%s images failed'%(self.registry_ip, self.registry_port, self.image))
 
     def check_registry(self):
         #command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
@@ -1155,6 +881,271 @@ class RancherAgent(Container):
             log.info('restart docker fail....')
             sys.exit(1)
 
+def confirm(msg):
+    while True:
+        try:
+            choose = raw_input(msg+"Y/N").strip()[0].lower() 
+        except (EOFError,KeyboardInterrupt,IndexError):
+            choose = 'q'
+        if choose == 'y':
+            return True
+        elif choose == 'n':
+            return False
+        elif choose == 'q':
+            sys.exit(1)
+        else:
+            pass
+       
+def get_hostip():
+    try:
+        hostip = subprocess.check_output(["/bin/sh", "-c", 'ip route show | grep "192.168" | grep "metric" | grep -v "default" | awk \'{print $9}\'']).strip('\n')
+        if not hostip:
+            log.error('can\'t get local host ip')
+            sys.exit(1)
+
+        return hostip
+    except Exception,e:
+        log.error("Can not get host ip:"+str(e))
+        sys.exit(1)
+
+# delete the '' or "" of a string
+def clean_str(var):
+    del_commas = ['\'', '\"']
+
+    if not var:
+        return var
+    for i in del_commas:
+        if var.startswith(i) and var.endswith(i):
+            return var.lstrip(i).rstrip(i)
+    return var
+
+
+def parse_conf(config_path):
+    if os.path.exists(config_path):
+        pass
+    else:
+        log.error('missing config file')
+        sys.exit(1)
+
+    conf_db = {}
+    try:
+        config = ConfigParser.RawConfigParser()
+        config.read(config_path)
+
+    except Exception, e: 
+        log.error(e)
+        sys.exit(1)
+
+    try:
+        section = 'REGISTRY'
+        conf_db['registry_ip'] = clean_str(config.get(section,'ip'))
+        conf_db['registry_port'] = clean_str(config.get(section,'port'))
+        conf_db['registry_name'] = clean_str(config.get(section,'name'))
+        conf_db['registry_store'] = clean_str(config.get(section,'store'))
+        conf_db['registry_password'] = clean_str(config.get(section, 'password'))
+
+        section = 'SERVER'
+        conf_db['server_ip'] = clean_str(config.get(section,'ip'))
+        conf_db['server_port'] = clean_str(config.get(section, 'port'))
+        conf_db['server_password'] = clean_str(config.get(section, 'password'))
+
+        section = 'REGISTRY_FRONTEND'
+        conf_db['registry_frontend_ip'] = clean_str(config.get(section,'ip'))
+        conf_db['registry_frontend_password'] = clean_str(config.get(section, 'password'))
+        conf_db['registry_frontend_name'] = clean_str(config.get(section, 'name'))
+        conf_db['registry_frontend_port'] = clean_str(config.get(section, 'port'))
+    except ConfigParser.NoOptionError, e:
+        log.error(str(e)+":Please make sure sections/options in your conf correct")
+        sys.exit(1)
+
+    try:
+        # rancher agent
+        if not conf_db['registry_ip'] or  not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_ip']):
+           raise MyException('Invalid conf argument [REGISTRY]/ip=\'%s\': not ip address or empty'%(conf_db['registry_ip'])) 
+
+
+        if not conf_db['registry_port'] or not re.match(r'^\d*$', conf_db['registry_port']):
+           raise MyException('Invalid conf argument [REGISTRY]/port= \'%s\': not digits or empty'%(conf_db['registry_port'])) 
+
+        if not conf_db['registry_store'] or not conf_db['registry_store'].startswith('/'):
+           raise MyException('Invalid conf argument [REGISTRY]/store=\'%s\':not absolute path or empty'%(conf_db['registry_store'])) 
+
+        #rancher server
+        if not conf_db['server_ip'] or not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['server_ip']):
+           raise MyException('Invalid conf argument [SERVER]/ip=\'%s\': not ip address or empty'%(conf_db['server_ip'])) 
+
+        if not conf_db['server_port'] or not re.match(r'^\d*$', conf_db['server_port']):
+           raise MyException('Invalid conf argument [SERVER]/port=\'%s\':no digits or empty'%(conf_db['server_port'])) 
+
+        #registry frontend
+
+        if not conf_db['registry_frontend_ip'] or not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',conf_db['registry_frontend_ip']):
+           raise MyException('Invalid conf argument [REGISTRY_FRONETEND]/ip= \'%s\': not ip address or empty'%(conf_db['registry_frontend_ip'])) 
+
+        if not conf_db['registry_frontend_port'] or not re.match(r'^\d*$', conf_db['registry_frontend_port']):
+           raise MyException('Invalid conf argument [REGISTRY_FRONTEND]/port=\'%s\': not  digits or empty'%(conf_db['registry_frontend_port'])) 
+
+    except MyException, e:
+        log.error(e)
+        sys.exit(1)
+
+    return conf_db
+
+def encrypt_password(password):
+    if not password:
+        raise MyException('invalid arg')
+    msg_text = password.rjust(32)
+    cipher = AES.new(_secret_key, AES.MODE_ECB)
+    encoded = base64.b64encode(cipher.encrypt(msg_text))
+    return encoded
+ 
+def decrypt_password(password_en):
+    if not password_en:
+        raise MyException('invalid arg')
+    ciper = AES.new(_secret_key, AES.MODE_ECB)
+    decoded = cipher.decrypt(base64.b64decode(password_en))
+    return decoded.strip()
+    
+
+def check_password(ip, password):
+    if not ip:
+        raise MyException('Invalid must not be empty')
+    if not password:
+        content = "please input \'%s\' password:"%(ip)
+        password = getpass.getpass(content)
+    i = 6 
+    while i:
+        try:
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh.connect(ip, 22, "root", password)
+            return 
+        except paramiko.ssh_exception.AuthenticationException, e: 
+            log.error(e)
+            i = i-1
+            if i == 0:
+                raise MyException("Over 5 times input wrong password...")
+            content = "please input \'%s\' correct password:"%(ip)
+            password = getpass.getpass(content)
+
+        except Exception, e:
+            raise MyException(str(e)) 
+        finally:
+            ssh.close()
+    if i <= 0:
+        raise MyException("Over 5 times input wrong password...")
+    else:
+        return password
+
+def parse_agent_conf(config_path):
+    if os.path.exists(config_path):
+        pass
+    else:
+        log.error('missing config file')
+        sys.exit(1)
+    try:
+
+        config = ConfigParser.RawConfigParser()
+        config.read(config_path)
+
+    except Exception, e: 
+        log.error(e)
+        sys.exit(1)
+
+    conf_db = {}
+    agents_conf = {}
+    ips = {}
+    pws = {}
+
+    section = 'AGENT'
+    for options in config.options(section):
+        if options == 'rancher-server-command':
+            if not config.get(section, options):
+                raise MyException('Must set rancher-server-command option, get it from rancher server web page > ADD HOST PAGE')
+            agents_conf[options]= clean_str(config.get(section, options))
+        if options.startswith('ip'):
+       #skip duplicate ips
+       #Note: ConfigParser will auto filter duplicate option, and choose the last option's value
+            #if ips.has_key(options):
+            #   print 'skip duplicate option:'+options
+            #    continue
+            ipaddr = clean_str(config.get(section, options))
+            if ipaddr:
+                ips[options] = ipaddr
+                if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',ipaddr):
+                    raise MyException('Invalid conf argument \'%s\': must be ip address'%(ipaddr)) 
+
+            else:
+                log.info('skip EMPTY option:%s'%(options))
+        if options.startswith('password'):
+            password = clean_str(config.get(section, options))
+            pws[options] = password
+                
+    for ipkey in ips.keys():
+        if agents_conf.has_key(ips[ipkey]):
+            log.info('skip duplicate host:%s'%(ips[ipkey]))
+            continue
+        agents_conf[ips[ipkey]]=''
+        ipindex = ipkey.replace('ip', '')
+        for pwkey in pws.keys():
+            if ipindex == pwkey.replace('password', ''):
+                agents_conf[ips[ipkey]] = pws[pwkey]
+                break
+
+        for agentkey in agents_conf.keys():
+            if not agents_conf[agentkey]:
+                content='Enter the %s\'s password:'%(agentkey)
+                agents_conf[agentkey]= getpass.getpass(prompt=content)
+
+    if len(agents_conf) == 1 and 'rancher-server-command' in agents_conf:
+        raise MyException('Agents:missing ip/password pair')
+
+    return agents_conf
+
+def list_registry():
+    command = 'docker images | awk \'{print $1":"$2}\''
+
+#获取所有镜像
+def list_container(image):
+    command = 'docker ps | awk \'{print $2}\''
+
+
+def setup_agent(conf_db, agents_conf, ip):
+    
+    try:
+        agent = RancherAgent(registry_ip=conf_db['registry_ip'], 
+                             registry_port=conf_db['registry_port'], 
+                             registry_password=conf_db['registry_password'],
+                             server_ip=conf_db['server_ip'],
+                             server_port=conf_db['server_port'],
+                             server_password=conf_db['server_password'],
+                             ip=ip,
+                             password=agents_conf[ip],
+                             add_host_command=agents_conf['rancher-server-command']
+                         )
+    except ContainerParameterError:
+        raise MyException('invalid conf, check if missing some conf')
+    try: 
+        agent.check_command()
+        log.debug('agent command:%s'%(agent.command))
+        agent.check_host()
+        if agent.check_running():
+            log.info('\'ip\'agent is running, skip...')
+            return  
+        agent.check_port_used()
+        log.debug('\'%s\'agent check port succeeded'%(agent.ip))
+        agent.check_rancher_server()
+        log.debug('\'%s\'agent check port succeeded'%(agent.ip))
+        agent.check_registry()
+        agent.add_registry(agent.registry_ip, agent.registry_port)
+        agent.restart_docker()
+        log.info('\'%s\'pulling images...'%(agent.ip))
+        agent.pull_image()
+        log.info('\'%s\'running agent...'%(agent.ip))
+        agent.run_agent()
+    except MyException, e:
+        raise MyException(str(e))
+
         
 def main():
 
@@ -1163,6 +1154,8 @@ def main():
         for opt, arg in opts:
             if opt in ('-d', '--debug'):
                 log.setLevel(logging.DEBUG)
+                DEBUG=True
+                
     except get.GetoptError:
         log.debug('invalid option, use default')
 
