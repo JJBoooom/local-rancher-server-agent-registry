@@ -143,7 +143,7 @@ class Container(FabricSupport):
                     log.error(e)
                     i = i-1
                     if i == 0:
-                        raise MyException("Over 5 times input wrong password...")
+                        raise MyException("over 5 times input wrong password...")
                     content = "please input \'%s\' correct password:"%(self.ip)
                     self.password = getpass.getpass(content)
 
@@ -151,7 +151,7 @@ class Container(FabricSupport):
                     raise MyException(str(e)) 
                 finally:
                     ssh.close()
-            raise MyException("Over 5 times input wrong password...")
+            raise MyException("over 5 times input wrong password...")
 
 
     def check_env(self):
@@ -163,7 +163,7 @@ class Container(FabricSupport):
             if confirm('docker daemon isn\'t running, Try to start it?'):
                 result = self.command_run('systemctl start docker') 
                 if result.failed:
-                    raise MyException('Can\'t start docker daemon')
+                    raise MyException('can\'t start docker daemon')
             else:
                 raise MyException('cancel to start docker daemon')
         else:
@@ -184,11 +184,11 @@ class Container(FabricSupport):
 
     def check_port_used(self):
         if int(self.port) < 0 or int(self.port) > 65535:
-            raise MyException('Invalid port:%s'%self.port)
+            raise MyException('invalid port:%s'%self.port)
         command = 'netstat -talnp | grep %s'%(self.port)
         result = self.command_run(command)
         if result.failed:
-            log.info('Port[%s] is available'%(self.port))
+            log.info('port[%s] is available'%(self.port))
         else:
             log.debug('port is used:%s'%(result.stdout))
             raise  PortUsedError('port is used', self.port)
@@ -213,7 +213,7 @@ class Container(FabricSupport):
                 command = 'sed -i "s/^\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
                 result = self.command_run(command)
                 if result.failed:
-                    raise MyException('set docker private registry conf failed')
+                    raise MyException('set docker private registry conf fail')
                 else:
                     log.info('add private registry success')
                     return 
@@ -226,7 +226,7 @@ class Container(FabricSupport):
                 command = 'sed -i "s/^\s*#\+\s*INSECURE_REGISTRY.*/%s/g" %s' %(content, docker_conf)
                 result = self.command_run(command)
                 if result.failed:
-                    raise MyException('set docker private registry conf failed')
+                    raise MyException('set docker private registry conf fail')
                 else:
                     log.info('add private registry success')
                     return 
@@ -239,7 +239,7 @@ class Container(FabricSupport):
                 log.info('add private registry success')
                 return 
             else:
-                raise MyException('set docker private registry conf failed')
+                raise MyException('set docker private registry conf fail')
 
         except MyException:
             raise MyException('add registry fail')
@@ -255,8 +255,7 @@ class Container(FabricSupport):
         command = 'systemctl restart docker'
         result = self.command_run(command) 
         if result.failed:
-            log.info('restart docker fail....')
-            sys.exit(1)
+            raise MyException('restart docker fail')
               
 
 
@@ -274,10 +273,10 @@ class Registry(Container):
     #def __init__(self, ip, image, port,password=None):
     def load_images(self, zipped_path, images_file):
         if not os.path.exists(zipped_path):
-            raise MyException('%s not exist'%(zipped_path))
+            raise MyException('%s does not exist'%(zipped_path))
         
         if not os.path.exists(images_file):
-            raise MyException('%s not exist'%(images_file))
+            raise MyException('%s does not exist'%(images_file))
 
         command = 'docker images | awk \'{print $1":"$2}\''
         result = self.command_run(command)
@@ -312,7 +311,7 @@ class Registry(Container):
                                 break
                         if match_flag:
                             continue
-                        log.info('image %s not exist'%(li))
+                        log.info('image %s does not exist'%(li))
                         all_match_flag = False
                         break
 
@@ -327,9 +326,9 @@ class Registry(Container):
                 finally:
                     f.close()
             else:
-                log.info('some images don\'t exist in local,start to load image')
+                log.info('some images don\'t exist in local,start to load images')
                 
-        log.info('start to upload local image tar package, it will lasts a few minutes, please wait in patience....')
+        log.info('start to upload local image tar package, it will last a few minutes, please wait in patience')
         try:
             tempdir = ''
             command = 'mktemp -d /tmp/zipped.XXXXXXX'
@@ -344,7 +343,7 @@ class Registry(Container):
             result = self.move_file(zipped_path, tempdir)
             if result.failed:
                 raise LoadImageError('%s:moving zipped to temp dir fail' % (self.ip))
-            log.info('upload image tar package successfully, now try to load to local docker, it will takes a few minutes')
+            log.info('upload image tar package success, now try to load to local docker, it will take a few minutes')
             command = 'tar xvzf %s' % (os.path.join(tempdir,os.path.basename(zipped_path)))
             if self.local:
                 with lcd(tempdir):
@@ -366,7 +365,7 @@ class Registry(Container):
             if result.failed:
                 raise LoadImageError("%s:list file fail"%(self.ip))
             else:
-                log.info('start to load images, please wait..')
+                log.info('start to load images, please wait')
                 for tfile in result.stdout.split():
                     command = 'docker load --input %s/%s'%(temp_zipped, tfile)
                     result = self.command_run(command)
@@ -1114,7 +1113,7 @@ def parse_agent_conf(config_path):
                     del agents_conf[agentkey]
 
     if len(agents_conf) == 1 and 'rancher-server-command' in agents_conf:
-        raise MyException('Agents:missing ip/password pair')
+        raise MyException('agents:missing ip/password pair')
 
     return agents_conf
 
@@ -1184,23 +1183,23 @@ def main():
     conf_db = parse_conf(config_path)
     while True:
         try:
-            choose = raw_input("Install Private Registry,[Y]es/[N]o:").strip()[0].lower()
+            choose = raw_input("install private registry,[Y]es/[N]o:").strip()[0].lower()
         except (EOFError,KeyboardInterrupt,IndexError):
             choose = 'q'
         if choose not in 'qyn':
             continue
 
         if choose == 'q':
-            log.info("Quiting...")
+            log.info("quiting...")
             logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
-            log.info("Cancel Private Registry install.")
+            log.info("cancel private registry installation.")
             break
         else:
-            log.info("Private Registry installing...")
+            log.info("private registry installing...")
             try:
-                log.info('check Registry \'%s\' password:' %(conf_db['registry_ip']) )
+                log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
                 pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
                 conf_db['registry_password'] = pw
                 log.info('registry password check success')
@@ -1222,7 +1221,6 @@ def main():
                 logging.shutdown()
                 sys.exit(1)
             try:
-                log.info('++++++++++++++')
                 rg.check_host()
                 rg.check_env()
                 rg.load_images(zipped_path, images_file)
@@ -1251,23 +1249,23 @@ def main():
 
     while True:
         try:
-            choose = raw_input("Install Rancher Server,[Y]es/[N]o:").strip()[0].lower()
+            choose = raw_input("install rancher server,[Y]es/[N]o:").strip()[0].lower()
         except (EOFError,KeyboardInterrupt,IndexError):
             choose = 'q'
         if choose not in 'qyn':
             continue
 
         if choose == 'q':
-            log.info("Quiting...")
+            log.info("quiting...")
             logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
-            log.info("Cancel Rancher Server install.")
+            log.info("cancel rancher server install.")
             break
         else:
-            log.info("Rancher Server installing...")
+            log.info("rancher server installing...")
             try: 
-                log.info('check Rancher Server \'%s\' password:' %(conf_db['server_ip']) )
+                log.info('check rancher server \'%s\' password:' %(conf_db['server_ip']) )
                 pw = check_password(conf_db['server_ip'], conf_db['server_password'])
                 conf_db['server_password'] = pw
                 log.info('rancher server password  check success')
@@ -1314,23 +1312,23 @@ def main():
 
     while True:
         try:
-            choose = raw_input("Instal Registry Frontend,[Y]es/[N]o:").strip()[0].lower()
+            choose = raw_input("instal registry frontend,[Y]es/[N]o:").strip()[0].lower()
         except (EOFError,KeyboardInterrupt,IndexError):
             choose = 'q'
         if choose not in 'qyn':
             continue
 
         if choose == 'q':
-            log.info("Quiting...")
+            log.info("quiting...")
             logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
-            log.info("Cancel Registry Frontend install.")
+            log.info("cancel registry frontend installation")
             break
         else:
-            log.info("Registry Frontend installing...")
+            log.info("registry frontend installing...")
             try:
-                log.info('check Registry Frontend  \'%s\' password:' %(conf_db['registry_frontend_ip']) )
+                log.info('check registry frontend  \'%s\' password:' %(conf_db['registry_frontend_ip']) )
                 pw = check_password(conf_db['registry_frontend_ip'], conf_db['registry_frontend_password'])
                 conf_db['registry_frontend_password'] = pw
                 log.info('registry frontend  password  check success')
@@ -1381,21 +1379,21 @@ def main():
 
     while True:
         try:
-            choose = raw_input("Install Rancher Agents,[Y]es/[N]o:").strip()[0].lower()
+            choose = raw_input("install rancher agents,[Y]es/[N]o:").strip()[0].lower()
         except (EOFError,KeyboardInterrupt,IndexError):
             choose = 'q'
         if choose not in 'qyn':
             continue
 
         if choose == 'q':
-            log.info("Quiting...")
+            log.info("quiting...")
             logging.shutdown()
             sys.exit(1) 
         elif choose == 'n':
-            log.info("Cancel Rancher Agents install.")
+            log.info("cancel rancher agents installation.")
             break
         else:
-            log.info("Rancher Agent installing...")
+            log.info("rancher agent is installing...")
     
             try:
                 agents_conf = parse_agent_conf(config_path)
@@ -1409,15 +1407,15 @@ def main():
                     if ip == 'rancher-server-command':
                         continue
                     log.info('----------------------------')
-                    log.info('setup agent in \'%s\'...', ip)
+                    log.info('setup agent in \'%s\''% ip)
                     setup_agent(conf_db, agents_conf, ip)
             except MyException, e:
-                log.error('%s setup agent fail:%s, skip...',ip,e)
+                log.error('%s setup agent fail:%s, skip...'%(ip,e))
             except (KeyboardInterrupt, SystemExit), e:
                 log.error(e)
                 logging.shutdown()
                 sys.exit(1)
-            log.info('Adding agent finish')
+            log.info('add agent finish')
             logging.shutdown()
             break
     fabric.network.disconnect_all()
