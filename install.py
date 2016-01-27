@@ -108,10 +108,6 @@ class Container(FabricSupport):
         self.port = port
         self.password = password
             
-#        if not self.password:
-#            content='Enter the %s\'s password:'%(self.ip)
-#            self.password = getpass.getpass(prompt=content)
-
         if self.ip == get_hostip():
             self.local = True
         else:
@@ -139,7 +135,6 @@ class Container(FabricSupport):
                     log.info('check host success')
                     return 
                 except paramiko.ssh_exception.AuthenticationException, e: 
-                    
                     log.error(e)
                     i = i-1
                     if i == 0:
@@ -292,7 +287,7 @@ class Registry(Container):
                 dockerimages.remove("REPOSITORY:TAG")
             except ValueError:
                 pass
-        #    deprecated='''
+
             if dockerimages: 
                 log.info('check if all image exist in local')
                 try:
@@ -476,32 +471,13 @@ class RancherServer(Container):
                     return
         else:
             log.info('now check registry is running ?')
-            i = 6
-            while i:
-                try:
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(self.registry_ip, 22, "root",self.registry_password)
-                    return 
-                except paramiko.ssh_exception.AuthenticationException, e: 
-                    log.error(e)
-                    i = i-1
-                    if i == 0:
-                        raise MyException("Over 5 times input wrong password...")
-                    content = "please input registry \'%s\' correct password:"%(self.registry_ip)
-                    self.registry_password = getpass.getpass(content)
-
-                except Exception, e:
-                    raise MyException(str(e)) 
-                finally:
-                    ssh.close()
-            if i <= 0:
-                raise MyException("Over 5 times input wrong password...")
+            log.debug(command)
             env.host_string = "%s:%s"%(self.registry_ip ,22) 
             env.password = self.registry_password
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
                 result = run(command)
                 if result.failed:
+                    log.debug('command run fail...')
                     raise MyException('registry is not running')
                 else:
                     log.info('check registry success') 
@@ -641,27 +617,6 @@ class RegistryFrontend(Container):
                     return 
         else:
             log.info('now check registry is running ?')
-            i = 6
-            while i:
-                try:
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(self.registry_ip, 22, "root",self.registry_password)
-                    break 
-                except paramiko.ssh_exception.AuthenticationException, e: 
-                    log.error(e)
-                    i = i-1
-                    if i == 0:
-                        raise MyException("Over 5 times input wrong password...")
-                    content = "please input registry \'%s\' correct password:"%(self.registry_ip)
-                    self.registry_password = getpass.getpass(content)
-
-                except Exception, e:
-                    raise MyException(str(e)) 
-                finally:
-                    ssh.close()
-            if i <= 0:
-                raise MyException("Over 5 times input wrong password...")
 
             env.host_string = "%s:%s"%(self.registry_ip ,22) 
             env.password = self.registry_password
@@ -726,27 +681,6 @@ class RancherAgent(Container):
                     return
         else:
             log.info('now check registry is running ?')
-            i = 6
-            while i:
-                try:
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                    ssh.connect(self.registry_ip, 22, "root",self.registry_password)
-                    return 
-                except paramiko.ssh_exception.AuthenticationException, e: 
-                    log.error(e)
-                    i = i-1
-                    if i == 0:
-                        raise MyException("Over 5 times input wrong password...")
-                    content = "please input registry \'%s\' correct password:"%(self.registry_ip)
-                    self.registry_password = getpass.getpass(content)
-
-                except Exception, e:
-                    raise MyException(str(e)) 
-                finally:
-                    ssh.close()
-            if i <= 0:
-                raise MyException("Over 5 times input wrong password...")
 
             env.host_string = "%s:%s"%(self.registry_ip ,22) 
             env.password = self.registry_password
@@ -1010,11 +944,13 @@ def decrypt_password(password_en):
     return decoded.strip()
     
 
-def check_password(ip, password):
+def check_password(ip, password,who=None):
+    if not who:
+        who = ''
     if not ip:
-        raise MyException('Invalid must not be empty')
+        raise MyException('ip must not be empty')
     if not password:
-        content = "please input \'%s\' password:"%(ip)
+        content = "please input %s\'%s\' correct password:"%(who, ip)
         password = getpass.getpass(content)
 
     i = 6 
@@ -1029,7 +965,7 @@ def check_password(ip, password):
             i = i-1
             if i == 0:
                 raise MyException("Over 5 times input wrong password...")
-            content = "please input \'%s\' correct password:"%(ip)
+            content = "please input %s\'%s\' correct password:"%(who,ip)
             password = getpass.getpass(content)
             log.debug('password:%s'%(password))
 
@@ -1106,7 +1042,7 @@ def parse_agent_conf(config_path):
                 log.debug('skip rancher-server-command')
                 continue
             try:
-                pw = check_password(agentkey, agents_conf[agentkey])
+                pw = check_password(agentkey, agents_conf[agentkey], 'agent')
                 agents_conf[agentkey] = pw
             except Exception, e:
                 log.info(str(e))
@@ -1209,7 +1145,7 @@ def main():
             registry_install = True
             try:
                 log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
-                pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
+                pw = check_password(conf_db['registry_ip'], conf_db['registry_password'], 'registry')
                 conf_db['registry_password'] = pw
                 log.info('registry password check success')
             except Exception, e:
@@ -1275,11 +1211,12 @@ def main():
             try: 
                 if not registry_install:
                     log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
-                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
+                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'], 'registry')
                     conf_db['registry_password'] = pw
                     log.info('registry password check success')
+                    log.info('-------------------------------')
                 log.info('check rancher server \'%s\' password:' %(conf_db['server_ip']) )
-                pw = check_password(conf_db['server_ip'], conf_db['server_password'])
+                pw = check_password(conf_db['server_ip'], conf_db['server_password'], 'server')
                 conf_db['server_password'] = pw
                 log.info('rancher server password check success')
             except Exception, e:
@@ -1343,12 +1280,12 @@ def main():
             try:
                 if not registry_install:
                     log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
-                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
+                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'], 'registry')
                     conf_db['registry_password'] = pw
                     log.info('registry password check success')
                     
                 log.info('check registry frontend  \'%s\' password:' %(conf_db['registry_frontend_ip']) )
-                pw = check_password(conf_db['registry_frontend_ip'], conf_db['registry_frontend_password'])
+                pw = check_password(conf_db['registry_frontend_ip'], conf_db['registry_frontend_password'], 'registry-frontend')
                 conf_db['registry_frontend_password'] = pw
                 log.info('registry frontend  password  check success')
             except Exception, e:
@@ -1415,13 +1352,15 @@ def main():
             log.info("rancher agent is installing...")
             try:
                 if not registry_install:
-                    log.info('check registry \'%s\' password:' %(conf_db['registry_ip']) )
-                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
+                    log.info('check registry \'%s\' password' %(conf_db['registry_ip']) )
+                    pw = check_password(conf_db['registry_ip'], conf_db['registry_password'], 'registry')
                     conf_db['registry_password'] = pw
                     log.info('registry password check success')
+                    log.info('-----------------------------')
+
                 if not server_install:
-                    log.info('check registry \'%s\' password:' %(conf_db['server_ip']) )
-                    pw = check_password(conf_db['server_ip'], conf_db['server_password'])
+                    log.info('check server \'%s\' password:' %(conf_db['server_ip']) )
+                    pw = check_password(conf_db['server_ip'], conf_db['server_password'],'server')
                     conf_db['server_password'] = pw
                     log.info('rancher server  password check success')
             except Exception, e:

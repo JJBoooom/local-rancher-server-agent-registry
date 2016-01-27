@@ -15,11 +15,11 @@ password=
 #store: volume shared between host and registry container.Can be empty, default to '/var/lib/MyPrivateRegistry'
 #password: password of host. If empty, you need to input when script runs.
 [REGISTRY]
-ip= 192.168.4.204
+ip= 192.168.4.30
 port=5000
 name=
 store=/var/lib/MyPrivateRegistry
-password=
+password=Cloudsoar123
 
 #regitry web frontend
 #ip: host to install
