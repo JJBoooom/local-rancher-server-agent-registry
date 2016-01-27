@@ -985,6 +985,9 @@ def parse_conf(config_path):
         if not conf_db['registry_frontend_port'] or not re.match(r'^\d*$', conf_db['registry_frontend_port']):
            raise MyException('Invalid conf argument [REGISTRY_FRONTEND]/port=\'%s\': not  digits or empty'%(conf_db['registry_frontend_port'])) 
 
+
+
+
     except MyException, e:
         log.error(e)
         sys.exit(1)
