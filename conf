@@ -6,7 +6,7 @@
 [SERVER]
 ip= 192.168.2.119
 port= 8080
-password=123456
+password=
 
 #registry
 #ip: host to install
@@ -15,11 +15,11 @@ password=123456
 #store: volume shared between host and registry container.Can be empty, default to '/var/lib/MyPrivateRegistry'
 #password: password of host. If empty, you need to input when script runs.
 [REGISTRY]
-ip= 192.168.2.119
+ip= 192.168.4.204
 port=5000
 name=
 store=/var/lib/MyPrivateRegistry
-password=123456
+password=
 
 #regitry web frontend
 #ip: host to install
@@ -28,7 +28,7 @@ password=123456
 [REGISTRY_FRONTEND]
 ip=192.168.2.119
 port=9980
-password=123456
+password=123456dafd
 name=
 
 

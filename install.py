@@ -33,6 +33,8 @@ class MyException(Exception):
         self.msg = msg
     def __str__(self):
         return self.msg
+class FiveTimeWrongPWError(MyException):
+    pass
         
 class LoadImageError(Exception):
     pass
@@ -126,6 +128,8 @@ class Container(FabricSupport):
         if self.local:
             return
         else:
+        #    return True
+            log.debug('start to check host')
             i = 6 
             while i:
                 try:
@@ -985,9 +989,6 @@ def parse_conf(config_path):
         if not conf_db['registry_frontend_port'] or not re.match(r'^\d*$', conf_db['registry_frontend_port']):
            raise MyException('Invalid conf argument [REGISTRY_FRONTEND]/port=\'%s\': not  digits or empty'%(conf_db['registry_frontend_port'])) 
 
-
-
-
     except MyException, e:
         log.error(e)
         sys.exit(1)
@@ -1016,13 +1017,14 @@ def check_password(ip, password):
     if not password:
         content = "please input \'%s\' password:"%(ip)
         password = getpass.getpass(content)
+
     i = 6 
     while i:
         try:
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(ip, 22, "root", password)
-            return 
+            ssh.connect(hostname=ip, port=22, username="root", password=password)
+            break
         except paramiko.ssh_exception.AuthenticationException, e: 
             log.error(e)
             i = i-1
@@ -1030,13 +1032,16 @@ def check_password(ip, password):
                 raise MyException("Over 5 times input wrong password...")
             content = "please input \'%s\' correct password:"%(ip)
             password = getpass.getpass(content)
+            log.debug('password:%s'%(password))
 
+        except paramiko.ssh_exception.BadHostKeyException, e:
+            raise MyException(str(e))
         except Exception, e:
             raise MyException(str(e)) 
         finally:
             ssh.close()
     if i <= 0:
-        raise MyException("Over 5 times input wrong password...")
+        raise FiveTimeWrongPWError("Over 5 times input wrong password...")
     else:
         return password
 
@@ -1096,9 +1101,17 @@ def parse_agent_conf(config_path):
                 break
 
         for agentkey in agents_conf.keys():
-            if not agents_conf[agentkey]:
-                content='Enter the %s\'s password:'%(agentkey)
-                agents_conf[agentkey]= getpass.getpass(prompt=content)
+     #       if not agents_conf[agentkey]:
+     #           content='Enter the %s\'s password:'%(agentkey)
+     #           agents_conf[agentkey]= getpass.getpass(prompt=content)
+            try:
+                pw = check_password(agentkey, agents_conf[agentkey])
+                agents_conf[agentkey] = pw
+            except Exception, e:
+                log.info(str(e))
+                if confirm('Skip \'%s\' Agent host?'):
+                    log.info('now skip \'%s\' Agent host')
+                    del agents_conf[agentkey]
 
     if len(agents_conf) == 1 and 'rancher-server-command' in agents_conf:
         raise MyException('Agents:missing ip/password pair')
@@ -1187,6 +1200,17 @@ def main():
         else:
             log.info("Private Registry installing...")
             try:
+                log.info('check Registry \'%s\' password:' %(conf_db['registry_ip']) )
+                pw = check_password(conf_db['registry_ip'], conf_db['registry_password'])
+                conf_db['registry_password'] = pw
+                log.info('registry password check success')
+                log.info('--------------------')
+                log.debug('registry_password:%s'%(conf_db['registry_password']))
+            except Exception, e:
+                log.error(e)
+                logging.shutdown()
+                sys.exit(1)
+            try:
                 rg = Registry( port=conf_db['registry_port'],
                                ip=conf_db['registry_ip'],
                                store=conf_db['registry_store'],
@@ -1198,6 +1222,7 @@ def main():
                 logging.shutdown()
                 sys.exit(1)
             try:
+                log.info('++++++++++++++')
                 rg.check_host()
                 rg.check_env()
                 rg.load_images(zipped_path, images_file)
@@ -1241,6 +1266,15 @@ def main():
             break
         else:
             log.info("Rancher Server installing...")
+            try: 
+                log.info('check Rancher Server \'%s\' password:' %(conf_db['server_ip']) )
+                pw = check_password(conf_db['server_ip'], conf_db['server_password'])
+                conf_db['server_password'] = pw
+                log.info('rancher server password  check success')
+            except Exception, e:
+                log.error(e)
+                logging.shutdown()
+                sys.exit(1)
 
             try:
                 rs = RancherServer(
@@ -1295,7 +1329,16 @@ def main():
             break
         else:
             log.info("Registry Frontend installing...")
-            
+            try:
+                log.info('check Registry Frontend  \'%s\' password:' %(conf_db['registry_frontend_ip']) )
+                pw = check_password(conf_db['registry_frontend_ip'], conf_db['registry_frontend_password'])
+                conf_db['registry_frontend_password'] = pw
+                log.info('registry frontend  password  check success')
+            except Exception, e:
+                log.error(e)
+                logging.shutdown()
+                sys.exit(1)
+
             try:
                 rf = RegistryFrontend(
                   ip=conf_db['registry_frontend_ip'],
