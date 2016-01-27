@@ -602,10 +602,10 @@ class RegistryFrontend(Container):
                 dockerimages = result.stdout.strip().split('\r\n')
             for image in dockerimages:
                 if image == frontend_image:
-                    log.info('image[%s] exists, skipping pull'%(frontend_image))
+                    log.info('image[%s] exists, skip pull'%(frontend_image))
                     return
                 if image == registry_frontend_image:
-                    log.debug('image[%s] exists, skipping pull, but need tag'%(registry_frontend_image))
+                    log.debug('image[%s] exists, skip pull, but need tag'%(registry_frontend_image))
                     need_pull = False
 
                     
@@ -614,7 +614,7 @@ class RegistryFrontend(Container):
                 command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
                 result = self.command_run(command)
                 if result.failed:
-                    raise MyException('pull images failed')
+                    raise MyException('pull images fail')
             #need to add check for images.existence
             tag_image = 'docker.io/%s'%(self.image)
             for j in dockerimages:
@@ -1068,8 +1068,9 @@ def parse_agent_conf(config_path):
     for options in config.options(section):
         if options == 'rancher-server-command':
             if not config.get(section, options):
-                raise MyException('Must set rancher-server-command option, get it from rancher server web page > ADD HOST PAGE')
+                raise MyException('must set rancher-server-command option, get it from rancher server web page > ADD HOST PAGE')
             agents_conf[options]= clean_str(config.get(section, options))
+            log.debug('%s:%s'%(options,agents_conf[options]))
         if options.startswith('ip'):
        #skip duplicate ips
        #Note: ConfigParser will auto filter duplicate option, and choose the last option's value
@@ -1080,10 +1081,10 @@ def parse_agent_conf(config_path):
             if ipaddr:
                 ips[options] = ipaddr
                 if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}.\d{1,3}$',ipaddr):
-                    raise MyException('Invalid conf argument \'%s\': must be ip address'%(ipaddr)) 
+                    raise MyException('invalid conf argument ipN=\'%s\': must be ip address'%(ipaddr)) 
 
             else:
-                log.info('skip EMPTY option:%s'%(options))
+                log.info('skip empty option:%s'%(options))
         if options.startswith('password'):
             password = clean_str(config.get(section, options))
             pws[options] = password
@@ -1100,17 +1101,20 @@ def parse_agent_conf(config_path):
                 break
 
         for agentkey in agents_conf.keys():
-     #       if not agents_conf[agentkey]:
-     #           content='Enter the %s\'s password:'%(agentkey)
-     #           agents_conf[agentkey]= getpass.getpass(prompt=content)
+            log.debug('\'%s\':\'%s\''%(repr(agentkey),repr(agents_conf[agentkey])))
+            if clean_str(agentkey) == 'rancher-server-command':
+                log.debug('skip rancher-server-command')
+                continue
             try:
                 pw = check_password(agentkey, agents_conf[agentkey])
                 agents_conf[agentkey] = pw
             except Exception, e:
                 log.info(str(e))
-                if confirm('Skip \'%s\' Agent host?'):
-                    log.info('now skip \'%s\' Agent host')
+                if confirm('skip \'%s\' agent host?'%(agentkey)):
+                    log.info('now skip \'%s\' agent host'%(agentkey))
                     del agents_conf[agentkey]
+                else:
+                    raise MyException('can\'t continue for invalid host \'%s\''%(agentkey)) 
 
     if len(agents_conf) == 1 and 'rancher-server-command' in agents_conf:
         raise MyException('agents:missing ip/password pair')
@@ -1405,6 +1409,7 @@ def main():
             try:
                 for ip in agents_conf.keys():
                     if ip == 'rancher-server-command':
+                        log.debug('skip agent')
                         continue
                     log.info('----------------------------')
                     log.info('setup agent in \'%s\''% ip)
