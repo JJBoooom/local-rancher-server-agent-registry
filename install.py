@@ -287,6 +287,8 @@ class Registry(Container):
                 dockerimages.remove("REPOSITORY:TAG")
             except ValueError:
                 pass
+            for i in dockerimages:
+                log.debug('image ---> %s'%i)
 
             if dockerimages: 
                 log.info('check if all image exist in local')
@@ -399,6 +401,7 @@ class Registry(Container):
                 dockerimages = result.stdout.strip().split('\n')
             else:
                 dockerimages = result.stdout.strip().split('\r\n')
+            
 
         try:
             f = open(images_file, 'r')
@@ -410,7 +413,12 @@ class Registry(Container):
                     if li.startswith('#') or not li:
                         continue
 
-                    newimage = li.replace('docker.io','%s:%s'%(self.ip, self.port))
+                    if li.startswith('docker.io'): 
+                        newimage = li.replace('docker.io','%s:%s'%(self.ip, self.port))
+                    else:
+                        newimage = "%s:%s/%s"%(self.ip, self.port, li)
+                    
+                    log.debug('%s----->tar===>%s'%(li, newimage))
                     tag_image_exist = False
                     for j in dockerimages:
                         if j == newimage:
@@ -443,7 +451,7 @@ class RancherServer(Container):
             not ip or not port) :
             raise ContainerParameterError
 
-        image = 'rancher/server:latest'
+        image = 'cloudsoar/rancher:1.0'
         Container.__init__(self, ip, image, port, password)
         self.registry_ip = registry_ip
         self.registry_port = registry_port
@@ -490,7 +498,8 @@ class RancherServer(Container):
             logging.warn('can\'t get docker images')
         else:
             need_pull = True
-            rancher_server_image = 'docker.io/%s'%(self.image)
+         #   rancher_server_image = 'docker.io/%s'%(self.image)
+            rancher_server_image = '%s'%(self.image)
             registry_rancher_server_image = '%s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
             if self.local:
                 dockerimages =  result.stdout.strip().split('\n')
@@ -693,7 +702,7 @@ class RancherAgent(Container):
                     return
             
     def check_rancher_server(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/rancher/server:latest'%(self.registry_ip, self.registry_port)
+        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/cloudsoar/rancher:1.0'%(self.registry_ip, self.registry_port)
         if self.server_ip == get_hostip():
             with settings(hide('running','warnings','stdout','stderr'),warn_only=True):
                 result = local(command)
@@ -1111,7 +1120,7 @@ def main():
                 log.setLevel(logging.DEBUG)
                 DEBUG=True
                 
-    except get.GetoptError:
+    except getopt.GetoptError:
         log.debug('invalid option, use default')
 
     script_dir_path =os.path.abspath(os.path.dirname(sys.argv[0]))
@@ -1182,6 +1191,8 @@ def main():
                     rg.add_registry(rg.ip, rg.port)
                     log.info('restart docker...')
                     rg.restart_docker()
+                    #睡眠，保证registry正常运行 
+                    time.sleep(5)
                     log.info('push images....')
                     rg.push_private_registry(images_file)
                 break                    
