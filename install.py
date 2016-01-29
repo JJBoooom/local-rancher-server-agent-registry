@@ -246,13 +246,58 @@ class Container(FabricSupport):
         
         command = 'setenforce 0'
         self.command_run(command)
-        
+
+        return
+        command = 'systemctl is-enabled firewalld'
+        result = self.command_run(command)
+        if result.failed:
+            raise MyException('Can\'t get firewalld status')
+        else:
+            if result.stdout.strip() != 'enabled':
+                log.debug('firewalld is inenable')
+                return
+            else:
+                log.debug('firewall is enable') 
+
+                command = 'systemctl is-active firewalld'
+                result = self.command_run(command)
+                if result.failed:
+                    raise MyException('Can\'t get firewalld status')
+                else:
+                    
+                    if result.stdout.strip() != 'active':
+                        log.debug('firewalld is inactive')
+                        return
+                    else:
+                        log.debug('firewalld is active')
+
+                        command = 'systemctl is-active firewalld'
+                        result = self.command_run(command)
+                        if result.failed:
+                            raise MyException('Can\'t get firewalld status')
+                        else:
+                            if result.stdout.strip() == 'inactive':
+                                log.info('firewalld is inactive')
+                                return
+                        
+                            command = 'firewall-cmd --zone=public --add-port=%s/tcp --permanent'%(self.port)
+                            result = self.command_run(command)
+                            if result.failed:
+                                raise MyException('set %s firewalld rule fail'%(self.port)) 
+                            else:
+                                command = 'firewall-cmd reload'
+                                result = self.command_run(command)
+                                if result.failed:
+                                    raise MyException('reload firewalld failed')
+                                else:
+                                    log.info('set firewalld rule success')
+            
     def restart_docker(self):
         command = 'systemctl restart docker'
         result = self.command_run(command) 
         if result.failed:
             raise MyException('restart docker fail')
-              
+                  
 
 
 class Registry(Container):
@@ -442,7 +487,7 @@ class Registry(Container):
             finally:
                 f.close()
         except Exception, e:
-            raise MyException('open %s fail:%s'%(images_file,str(e)))
+                raise MyException('open %s fail:%s'%(images_file,str(e)))
 
 class RancherServer(Container):
  #   def __init__(self, registry_ip, registry_port, registry_password, ip, port, password):
@@ -525,6 +570,7 @@ class RancherServer(Container):
                 log.debug('image to match:%s --->%s'% (j, tag_image))
                 if j == tag_image:
                     log.info('%s exist, skip tag'%(tag_image))
+                    return 
             #need to add check for images.existence
             command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
             result = self.command_run(command)
@@ -585,39 +631,39 @@ class RegistryFrontend(Container):
         else:
             need_pull = True
             frontend_image = 'docker.io/%s'%(self.image)
-            
-            registry_frontend_image = '%s:%s/%s'%(self.ip, self.port,self.image)
-            if self.local:
-                dockerimages = result.stdout.strip().split('\n')
-            else:
-                dockerimages = result.stdout.strip().split('\r\n')
-            for image in dockerimages:
-                if image == frontend_image:
-                    log.info('image[%s] exists, skip pull'%(frontend_image))
-                    return
-                if image == registry_frontend_image:
-                    log.debug('image[%s] exists, skip pull, but need tag'%(registry_frontend_image))
-                    need_pull = False
+        
+        registry_frontend_image = '%s:%s/%s'%(self.ip, self.port,self.image)
+        if self.local:
+            dockerimages = result.stdout.strip().split('\n')
+        else:
+            dockerimages = result.stdout.strip().split('\r\n')
+        for image in dockerimages:
+            if image == frontend_image:
+                log.info('image[%s] exists, skip pull'%(frontend_image))
+                return
+            if image == registry_frontend_image:
+                log.debug('image[%s] exists, skip pull, but need tag'%(registry_frontend_image))
+                need_pull = False
 
-                    
-            #增加镜像是否存在的判断
-            if need_pull: 
-                command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
-                result = self.command_run(command)
-                if result.failed:
-                    raise MyException('pull images fail')
-            #need to add check for images.existence
-            tag_image = 'docker.io/%s'%(self.image)
-            for j in dockerimages:
-                log.debug('image to match:%s --->%s'% (j, tag_image))
-                if j == tag_image:
-                    log.info('%s exist, skip tag'%(tag_image))
-                    return 
-
-            command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
+                
+        #增加镜像是否存在的判断
+        if need_pull: 
+            command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
             result = self.command_run(command)
             if result.failed:
-                raise MyException('tag %s:%s/%s images failed'%(self.registry_ip, self.registry_port, self.image))
+                raise MyException('pull images fail')
+        #need to add check for images.existence
+        tag_image = 'docker.io/%s'%(self.image)
+        for j in dockerimages:
+            log.debug('image to match:%s --->%s'% (j, tag_image))
+            if j == tag_image:
+                log.info('%s exist, skip tag'%(tag_image))
+                return 
+
+        command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
+        result = self.command_run(command)
+        if result.failed:
+            raise MyException('tag %s:%s/%s images failed'%(self.registry_ip, self.registry_port, self.image))
 
     def check_registry(self):
         #command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
@@ -1079,7 +1125,6 @@ def list_registry():
 def list_container(image):
     command = 'docker ps | awk \'{print $2}\''
 
-
 def setup_agent(conf_db, agents_conf, ip):
     
     try:
@@ -1259,6 +1304,7 @@ def main():
                 rs.check_host()
                 rs.check_env()
                 rs.check_registry()
+                rs.set_system_firewalld_selinux()
                 if rs.check_running():
                     log.info('rancher server is running')
                     break
@@ -1332,6 +1378,7 @@ def main():
                     break
                 rf.check_port_used()
                 rf.check_registry()
+                rf.set_system_firewalld_selinux()
                 rf.add_registry(rf.registry_ip, rf.registry_port)
                 log.info('restart docker...')
                 if conf_db['server_ip'] == rf.ip:
