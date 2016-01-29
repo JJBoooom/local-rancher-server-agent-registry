@@ -520,6 +520,11 @@ class RancherServer(Container):
                 if result.failed:
                     raise MyException('%s fail'%(command))
 
+            tag_image = 'docker.io/%s'%(self.image)
+            for j in dockerimages:
+                log.debug('image to match:%s --->%s'% (j, tag_image))
+                if j == tag_image:
+                    log.info('%s exist, skip tag'%(tag_image))
             #need to add check for images.existence
             command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
             result = self.command_run(command)
