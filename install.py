@@ -497,7 +497,7 @@ class RancherServer(Container):
             not ip or not port) :
             raise ContainerParameterError
 
-        image = 'cloudsoar/rancher:1.0'
+        image = 'cloudsoar/rancher:1.1'
         Container.__init__(self, ip, image, port, password)
         self.registry_ip = registry_ip
         self.registry_port = registry_port
