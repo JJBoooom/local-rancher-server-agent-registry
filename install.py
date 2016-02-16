@@ -33,6 +33,7 @@ class MyException(Exception):
         self.msg = msg
     def __str__(self):
         return self.msg
+
 class FiveTimeWrongPWError(MyException):
     pass
         
@@ -178,6 +179,17 @@ class Container(FabricSupport):
             return True
 
 
+    def check_container_running(self, ip, password, image, name=None):
+    
+        command = 'docker ps -a -q'
+        if ip == get_hostip():
+            local = True
+        else:
+            local = True
+
+        temp = FabricSupport.command_run(self, localflag ,command)
+
+
     def check_port_used(self):
         if int(self.port) < 0 or int(self.port) > 65535:
             raise MyException('invalid port:%s'%self.port)
@@ -188,6 +200,8 @@ class Container(FabricSupport):
         else:
             log.debug('port is used:%s'%(result.stdout))
             raise  PortUsedError('port is used', self.port)
+
+        
 
     def add_registry(self, registry_ip, registry_port):
         docker_conf = '/etc/sysconfig/docker'
@@ -301,8 +315,7 @@ class Container(FabricSupport):
 
 
 class Registry(Container):
-    def __init__(self, ip, port, store, password=None, name=None):
-        image = 'registry:2'
+    def __init__(self, ip, port, store, image, password=None, name=None):
         Container.__init__(self, ip, image, port, password)
         self.store = store
         self.name = name
@@ -311,7 +324,6 @@ class Registry(Container):
             self.store = '/var/lib/MyPrivateRegistry'
 
 
-    #def __init__(self, ip, image, port,password=None):
     def load_images(self, zipped_path, images_file):
         if not os.path.exists(zipped_path):
             raise MyException('%s does not exist'%(zipped_path))
@@ -491,13 +503,13 @@ class Registry(Container):
 
 class RancherServer(Container):
  #   def __init__(self, registry_ip, registry_port, registry_password, ip, port, password):
-    def __init__(self, registry_ip, registry_port, ip, port, password = None, registry_password = None):
+    def __init__(self, registry_ip, registry_port, ip, port, image, password = None, registry_password = None):
 
         if (not registry_ip or not registry_port or 
             not ip or not port) :
             raise ContainerParameterError
 
-        image = 'cloudsoar/rancher:1.1'
+      #  image = 'cloudsoar/rancher:1.1'
         Container.__init__(self, ip, image, port, password)
         self.registry_ip = registry_ip
         self.registry_port = registry_port
@@ -596,11 +608,11 @@ class RancherServer(Container):
             sys.exit(1)
 
 class RegistryFrontend(Container):
-    def __init__(self, ip, registry_ip, registry_port, port, name=None, password=None, registry_password=None):
+    def __init__(self, ip, registry_ip, registry_port, port, image,name=None, password=None, registry_password=None):
         if not registry_ip or not registry_port:
             raise ContainerParameterError
 
-        image = 'konradkleine/docker-registry-frontend:v2'
+      #  image = 'konradkleine/docker-registry-frontend:v2'
         Container.__init__(self, ip, image, port,password)
         self.registry_ip = registry_ip
         self.registry_port = registry_port
@@ -701,12 +713,12 @@ class RegistryFrontend(Container):
             sys.exit(1)
 
 class RancherAgent(Container):
-    def __init__(self, registry_ip, registry_port, server_ip, server_port, ip, add_host_command, registry_password=None, server_password=None, password=None):
-        if not registry_ip or not registry_port or not server_ip or not server_port or not ip or not add_host_command:
+    def __init__(self, registry_ip, registry_port, server_ip, server_port, ip, add_host_command, image,registry_password=None, server_password=None, password=None):
+        if not registry_ip or not registry_port or not server_ip or not server_port or not ip or not add_host_command or not image:
             raise ContainerParameterError
 
         port = '1024'
-        image = 'rancher/agent:v0.8.2'
+        #image = 'rancher/agent:v0.8.2'
         Container.__init__(self, ip, image, port,password)
 
         self.registry_ip = registry_ip
@@ -754,7 +766,7 @@ class RancherAgent(Container):
                     return
             
     def check_rancher_server(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/cloudsoar/rancher:1.0'%(self.registry_ip, self.registry_port)
+        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/cloudsoar/rancher:1.1'%(self.registry_ip, self.registry_port)
         if self.server_ip == get_hostip():
             with settings(hide('running','warnings','stdout','stderr'),warn_only=True):
                 result = local(command)
@@ -1125,6 +1137,7 @@ def list_registry():
 def list_container(image):
     command = 'docker ps | awk \'{print $2}\''
 
+
 def setup_agent(conf_db, agents_conf, ip):
     
     try:
@@ -1178,6 +1191,16 @@ def main():
     config_path = script_dir_path+'/conf'
     zipped_path = script_dir_path+'/images_zipped.tar.gz'
     images_file = script_dir_path+'/imagelists'
+
+
+    # images
+    registry_image='registry:2'
+    cloud_rancher_image='cloudsoar/rancher:1.1'
+    registry_frontend_image='konradkleine/docker-registry-frontend:v2'
+    rancher_agent_image='rancher/agent:v0.8.2'
+    rancher_agent_instance='rancher/agent-instance:v0.6.0'
+    
+
     log.info("loading config from "+config_path)
 
 
@@ -1218,6 +1241,7 @@ def main():
                                store=conf_db['registry_store'],
                                name=conf_db['registry_name'],
                                password=conf_db['registry_password'],
+                               image=registry_image
                         )
             except ContainerParameterError:
                 log.error('invalid argument')
@@ -1293,7 +1317,9 @@ def main():
                     registry_password=conf_db['registry_password'], 
                     ip=conf_db['server_ip'], 
                     port=conf_db['server_port'],
-                    password=conf_db['server_password'])
+                    password=conf_db['server_password'],
+                    image=cloud_rancher_image
+                    )
             except ContainerParameterError:
                 log.error('invalid conf, check if missing some conf')
                 logging.shutdown()
@@ -1364,7 +1390,9 @@ def main():
                   registry_port=conf_db['registry_port'],
                   registry_password=conf_db['registry_password'],
                   port=conf_db['registry_frontend_port'],
-                  name=conf_db['registry_frontend_name'])
+                  name=conf_db['registry_frontend_name'],
+                  image=registry_frontend_image
+                  )
             except ContainerParameterError:
                 log.error('invalid conf, please check conf')
                 logging.shutdown()
