@@ -5,4 +5,4 @@ docker.io/rancher/agent:v0.8.2
 docker.io/registry:2
 docker.io/konradkleine/docker-registry-frontend:v2
 docker.io/rancher/agent-instance:v0.6.0
-cloudsour/rancher:1.0
+cloudsoar/rancher:1.1

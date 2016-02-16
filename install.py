@@ -17,13 +17,19 @@ import time
 from Crypto.Cipher import AES
 import base64
 import getopt
+import requests
+import json
+import socket
+import fcntl
+import struct
+import array
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - <%(levelname)s> - %(message)s')
 log = logging.getLogger(__name__)
 
 #for encrpyt
 _secret_key='1234567890123456'
-DEBUG=False
 
 class ContainerParameterError(Exception):
     pass
@@ -45,7 +51,7 @@ class ContainerRunError(MyException):
     def __init__(self, command):
         self.command = command
     def __str__(self):
-        return 'Docker command\'%s\' run fail'%(self.command)
+        return 'Docker command \'%s\' run fail'%(self.command)
 
 
 class DockerListImageError(MyException):
@@ -101,7 +107,6 @@ class FabricSupport:
 class Container(FabricSupport):
 
     def __init__(self, ip, image, port, password=None):
-
         if not ip or not image or not port:
             raise ContainerParameterError
 
@@ -126,7 +131,6 @@ class Container(FabricSupport):
         if self.local:
             return
         else:
-        #    return True
             log.debug('start to check host')
             i = 6 
             while i:
@@ -168,7 +172,6 @@ class Container(FabricSupport):
             log.info('check docker enviroment success')
 
     def check_running(self):
-
         command = 'docker ps | awk \'{print $2}\' | grep %s'%(self.image)
         log.debug(command)
         result = self.command_run(command)
@@ -180,7 +183,6 @@ class Container(FabricSupport):
 
 
     def check_container_running(self, ip, password, image, name=None):
-    
         command = 'docker ps -a -q'
         if ip == get_hostip():
             local = True
@@ -200,8 +202,6 @@ class Container(FabricSupport):
         else:
             log.debug('port is used:%s'%(result.stdout))
             raise  PortUsedError('port is used', self.port)
-
-        
 
     def add_registry(self, registry_ip, registry_port):
         docker_conf = '/etc/sysconfig/docker'
@@ -265,10 +265,10 @@ class Container(FabricSupport):
         command = 'systemctl is-enabled firewalld'
         result = self.command_run(command)
         if result.failed:
-            raise MyException('Can\'t get firewalld status')
+            raise MyException('can\'t get firewalld status')
         else:
             if result.stdout.strip() != 'enabled':
-                log.debug('firewalld is inenable')
+                log.debug('firewalld isn\'t enable')
                 return
             else:
                 log.debug('firewall is enable') 
@@ -503,7 +503,7 @@ class Registry(Container):
 
 class RancherServer(Container):
  #   def __init__(self, registry_ip, registry_port, registry_password, ip, port, password):
-    def __init__(self, registry_ip, registry_port, ip, port, image, password = None, registry_password = None):
+    def __init__(self, registry_ip, registry_port, registry_image, ip, port, image, password = None, registry_password = None):
 
         if (not registry_ip or not registry_port or 
             not ip or not port) :
@@ -513,6 +513,7 @@ class RancherServer(Container):
         Container.__init__(self, ip, image, port, password)
         self.registry_ip = registry_ip
         self.registry_port = registry_port
+        self.registry_image = registry_image
         self.password = password
         self.image = image
         self.registry_password = registry_password
@@ -526,7 +527,7 @@ class RancherServer(Container):
 
     def check_registry(self):
         #command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
-        command = 'docker ps | awk \'{print $2}\' | grep registry:2'
+        command = 'docker ps | awk \'{print $2}\' | grep %s'%(self.registry_image)
         if self.registry_ip == get_hostip():
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
                 result = local(command)
@@ -608,7 +609,7 @@ class RancherServer(Container):
             sys.exit(1)
 
 class RegistryFrontend(Container):
-    def __init__(self, ip, registry_ip, registry_port, port, image,name=None, password=None, registry_password=None):
+    def __init__(self, ip, registry_ip, registry_port,registry_image, port, image,name=None, password=None, registry_password=None):
         if not registry_ip or not registry_port:
             raise ContainerParameterError
 
@@ -616,6 +617,7 @@ class RegistryFrontend(Container):
         Container.__init__(self, ip, image, port,password)
         self.registry_ip = registry_ip
         self.registry_port = registry_port
+        self.registry_image = registry_image
         self.registry_password = registry_password
         self.name = name
 
@@ -679,7 +681,7 @@ class RegistryFrontend(Container):
 
     def check_registry(self):
         #command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
-        command = 'docker ps | awk \'{print $2}\' | grep registry:2'
+        command = 'docker ps | awk \'{print $2}\' | grep %s'%(self.registry_image)
         if self.registry_ip == get_hostip():
             with settings(hide('warnings','stdout','running','stderr'),warn_only=True):
                 result = local(command)
@@ -713,7 +715,7 @@ class RegistryFrontend(Container):
             sys.exit(1)
 
 class RancherAgent(Container):
-    def __init__(self, registry_ip, registry_port, server_ip, server_port, ip, add_host_command, image,registry_password=None, server_password=None, password=None):
+    def __init__(self, registry_ip, registry_port, registry_image,server_ip, server_port, server_image, ip, add_host_command, image, agent_instance_image,registry_password=None, server_password=None, password=None):
         if not registry_ip or not registry_port or not server_ip or not server_port or not ip or not add_host_command or not image:
             raise ContainerParameterError
 
@@ -723,11 +725,14 @@ class RancherAgent(Container):
 
         self.registry_ip = registry_ip
         self.registry_port = registry_port
+        self.registry_image = registry_image
         self.registry_password = registry_password
         self.server_ip = server_ip
         self.server_port = server_port
         self.server_password = server_password
+        self.server_image = server_image
         self.command = add_host_command
+        self.agent_instance_image = agent_instance_image
         self.port = None
         
         if not self.registry_password:
@@ -743,7 +748,7 @@ class RancherAgent(Container):
 
     def check_registry(self):
      #   command = 'docker ps | awk \'{print $2}\' | grep %s:%s/registry:2'%(self.registry_ip, self.registry_port)
-        command = 'docker ps | awk \'{print $2}\' | grep registry:2'
+        command = 'docker ps | awk \'{print $2}\' | grep %s'%(self.registry_image)
         if self.registry_ip == get_hostip():
             with settings(hide('stdout','stderr','running','warnings'),warn_only=True):
                 result = local(command)
@@ -766,7 +771,7 @@ class RancherAgent(Container):
                     return
             
     def check_rancher_server(self):
-        command = 'docker ps | awk \'{print $2}\' | grep %s:%s/cloudsoar/rancher:1.1'%(self.registry_ip, self.registry_port)
+        command = 'docker ps | awk \'{print $2}\' | grep %s'%(self.server_image)
         if self.server_ip == get_hostip():
             with settings(hide('running','warnings','stdout','stderr'),warn_only=True):
                 result = local(command)
@@ -807,7 +812,7 @@ class RancherAgent(Container):
                     log.info('check rancher server success')
         
     def check_command(self):
-        match_string = r'.*http://%s:%s/v1/scripts/.*'%(self.server_ip,self.server_port)
+        match_string = r'.*http://%s:%s/v1/.*'%(self.server_ip,self.server_port)
         log.info('%s'%match_string)
         searchObj = re.search(match_string, self.command, re.I)
         if not searchObj:
@@ -824,7 +829,7 @@ class RancherAgent(Container):
             raise MyException('can\'t get docker images')
         else:
             agent_image = 'docker.io/%s'%(self.image)
-            agent_instance_image = 'docker.io/rancher/agent-instance:v0.6.0'
+            agent_instance_image = self.agent_instance_image
             if self.local: 
                 dockerimages = result.stdout.strip().split('\n')
             else:
@@ -852,25 +857,25 @@ class RancherAgent(Container):
                     e_instance = True
 
             if not e_instance:
-                command = 'docker pull %s:%s/rancher/agent-instance:v0.6.0'%(self.registry_ip, self.registry_port)
+                command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.agent_instance_image)
                 result = self.command_run(command)
                 if result.failed:
                     raise MyException('run \'%s\' fail'%command)
                     
             if not t_agent_instance:
-                command = 'docker tag %s:%s/rancher/agent-instance:v0.6.0 docker.io/rancher/agent-instance:v0.6.0'%(self.registry_ip, self.registry_port)
+                command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.agent_instance_image, self.agent_instance_image)
                 result = self.command_run(command)
                 if result.failed:
                     raise MyException('run \'%s\' fail'%command)
 
             if not e_agent:
-                command = 'docker pull %s:%s/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
+                command = 'docker pull %s:%s/%s'%(self.registry_ip, self.registry_port, self.image)
                 result = self.command_run(command)
                 if result.failed:
                     raise MyException('run \'%s\' fail'%command)
             
             if not t_agent:
-                command = 'docker tag %s:%s/rancher/agent:v0.8.2 docker.io/rancher/agent:v0.8.2'%(self.registry_ip, self.registry_port)
+                command = 'docker tag %s:%s/%s docker.io/%s'%(self.registry_ip, self.registry_port, self.image, self.image)
                 result = self.command_run(command)
                 if result.failed:
                     raise MyException('run \'%s\' fail'%command)
@@ -906,7 +911,7 @@ def confirm(msg):
         else:
             pass
        
-def get_hostip():
+def get_hostip1():
     try:
         hostip = subprocess.check_output(["/bin/sh", "-c", 'ip route show | grep "192.168" | grep "metric" | grep -v "default" | awk \'{print $9}\'']).strip('\n')
         if not hostip:
@@ -917,6 +922,50 @@ def get_hostip():
     except Exception,e:
         log.error("Can not get host ip:"+str(e))
         sys.exit(1)
+
+def get_hostip():
+    filter_list =['lo','docker']
+
+    ifs = _get_all_interfaces()
+    if not ifs:
+        raise MyException('get net interface fail')
+    else:
+        for i in ifs:
+            for j in filter_list:
+                if i[0].strip().startswith(j):
+                    ifs.remove(i)
+    if_ip = {}
+    if not ifs:
+        raise MyException('no physical interface exists')
+
+    for i in ifs:
+        if_ip[i[0]] = _format_ip(i[1]) 
+
+    return if_ip
+
+def _format_ip(addr):
+    return str(ord(addr[0])) + '.' +\
+        str(ord(addr[1])) + '.'+\
+        str(ord(addr[2])) + '.'+\
+        str(ord(addr[3]))
+
+def _get_all_interfaces():
+    max_possible = 128
+    bytes = max_possible * 32
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    names = array.array('B', '\0' * bytes)
+    outbytes = struct.unpack('iL', fcntl.ioctl(
+        s.fileno(),
+        0x8912,
+        struct.pack('iL', bytes, names.buffer_info()[0])
+    ))[0]
+    namestr = names.tostring()
+    lst = []
+    for i in range(0, outbytes, 40):
+        name = namestr[i:i+16].split('\0', 1)[0]
+        ip = namestr[i+20:i+24]
+        lst.append((name, ip))
+    return lst
 
 # delete the '' or "" of a string
 def clean_str(var):
@@ -1075,11 +1124,11 @@ def parse_agent_conf(config_path):
 
     section = 'AGENT'
     for options in config.options(section):
-        if options == 'rancher-server-command':
-            if not config.get(section, options):
-                raise MyException('must set rancher-server-command option, get it from rancher server web page > ADD HOST PAGE')
-            agents_conf[options]= clean_str(config.get(section, options))
-            log.debug('%s:%s'%(options,agents_conf[options]))
+    #    if options == 'rancher-server-command':
+    #        if not config.get(section, options):
+    #            raise MyException('must set rancher-server-command option, get it from rancher server web page > ADD HOST PAGE')
+    #        agents_conf[options]= clean_str(config.get(section, options))
+    #        log.debug('%s:%s'%(options,agents_conf[options]))
         if options.startswith('ip'):
        #skip duplicate ips
        #Note: ConfigParser will auto filter duplicate option, and choose the last option's value
@@ -1130,6 +1179,9 @@ def parse_agent_conf(config_path):
 
     return agents_conf
 
+
+
+
 def list_registry():
     command = 'docker images | awk \'{print $1":"$2}\''
 
@@ -1137,20 +1189,150 @@ def list_registry():
 def list_container(image):
     command = 'docker ps | awk \'{print $2}\''
 
+def print_json(json_string):
+    log.debug(json.dumps(json_string, indent=4))
 
-def setup_agent(conf_db, agents_conf, ip):
+def get_default_environment_id(ip, port):
+    full_url='http://%s:%s/v1/projects'%(ip, port)
+
+    try:
+        r = requests.get(full_url)
+    except requests.exceptions.ConnectionError:
+        log.debug('sleep 1s for waiting server start')
+        time.sleep(1)
+        try:
+            r = requests.get(full_url)
+        except requests.exceptions.ConnectionError:
+            log.debug('sleep 5s for waiting server start')
+            time.sleep(5)
+            try:
+                r = requests.get(full_url)
+            except requests.exceptions.ConnectionError:
+                log.debug('sleep 10s for waiting server start')
+                time.sleep(10)
+                try:
+                    r = requests.get(full_url)
+                except requests.exceptions.ConnectionError:
+                    raise MyException('can\'t send http request to server')
+
+    project_collection = r.json()
+    print_json(project_collection)
+
+    if not 'data' in project_collection:
+        raise MyException('can\'t get default environment id :\'data\' missing')
+        
+    projects = project_collection['data']
+    default_environment_id='' 
+    for project in projects:
+        if project['name'] == 'Default':
+            default_environment_id = project['id']
+    if not default_environment_id:
+        raise MyException('can\'t get default environment id')
+    return default_environment_id
+       
+def create_apikey(ip,port,project_id):
+    full_url='http://%s:%s/v1/projects/%s/apikeys'%(ip, port, project_id)
+    try:
+        r = requests.post(full_url)
+    except requests.exceptions.ConnectionError:
+        raise MyException('http request to rancher server fail')
+    new_apikey = r.json()
+    if not new_apikey:
+        raise MyException('can\'t get api key:json missing')
+    print_json(new_apikey)
+    if not 'publicValue' in new_apikey or not 'secretValue' in new_apikey:
+        raise MyException('can\'t get api key: missing public/secret key')
+    return (new_apikey['publicValue'],new_apikey['secretValue'])
+
+
+def create_registrationtoken(ip, port,project_id,user_pw_pair):
+    full_url='http://%s:%s/v1/projects/%s/registrationTokens'%(ip, port, project_id)
+    try:
+        r = requests.post(full_url,auth=user_pw_pair)
+    except requests.exceptions.ConnectionError:
+        raise MyException('http request to rancher server fail')
+    new_regsitrationtoken = r.json()
+    if not new_regsitrationtoken:
+        raise MyException('can\'t create new registrationtoken: missing json')
+    print_json(new_regsitrationtoken)
+
+    if not 'id' in new_regsitrationtoken:
+        raise MyException('can\'t create new registrationtoken:missing id')
+
+    token_id = new_regsitrationtoken['id']
+    if not token_id:
+        raise MyException('can\'t get registrationtoken id')
+    time.sleep(3)
+
+    full_url='http://%s:%s/v1/projects/%s/registrationTokens/%s'%(ip, port, project_id,token_id)
+    #need to wait the cattle create command, sleep 1-3 seconds
+    try:
+        r = requests.get(full_url)
+    except requests.exceptions.ConnectionError:
+        raise MyException('http request to registrationtoken fail')
+    jtoken = r.json()
+    if not jtoken:
+        raise MyException('can\'t get registration token')
+    print_json(jtoken)
+    if not 'command' in jtoken:
+        raise MyException('can\'t get command key')
+    if not jtoken['command']:
+        raise MyException('can\'t get command')
+    return jtoken['command']
+
+def create_apikey(ip,port,project_id):
+    full_url='http://%s:%s/v1/projects/%s/apikeys'%(ip, port, project_id)
+    r = requests.post(full_url)
+    new_apikey = r.json()
+    print_json(new_apikey)
+    return (new_apikey['publicValue'],new_apikey['secretValue'])
+
+def print_json(json_string):
+    print json.dumps(json_string, indent=4)
+
+
+#problem? how long an apikey lasts?
+#user_pw_pair: tuple of 
+def create_registrationtoken(ip, port,project_id,user_pw_pair):
+    full_url='http://%s:%s/v1/projects/%s/registrationTokens'%(ip, port, project_id)
+    r = requests.post(full_url,auth=user_pw_pair)
+    new_regsitrationtoken = r.json()
+    print_json(new_regsitrationtoken)
+
+    token_id = new_regsitrationtoken['id']
+    time.sleep(3)
+
+    full_url='http://%s:%s/v1/projects/%s/registrationTokens/%s'%(ip, port, project_id,token_id)
+    #need to wait the cattle create command, sleep 1-3 seconds
+    r = requests.get(full_url)
+    jtoken = r.json()
+    print_json(jtoken)
+    return jtoken['command']
+
+
+#key_pw = create_apikey(ip, port, default_environment_id)
+#create_registrationtoken(ip, port, default_environment_id, key_pw)
+ 
+
     
+
+def setup_agent(conf_db, agents_conf, ip, command, image, instance_image,registry_image,  rancher_server_image):
     try:
         agent = RancherAgent(registry_ip=conf_db['registry_ip'], 
                              registry_port=conf_db['registry_port'], 
                              registry_password=conf_db['registry_password'],
+                             registry_image=registry_image,
                              server_ip=conf_db['server_ip'],
                              server_port=conf_db['server_port'],
                              server_password=conf_db['server_password'],
+                             server_image=rancher_server_image,
                              ip=ip,
                              password=agents_conf[ip],
-                             add_host_command=agents_conf['rancher-server-command']
+                             add_host_command=command,
+                             image=image,
+                             agent_instance_image=instance_image 
                          )
+              #               add_host_command=agents_conf['rancher-server-command']
     except ContainerParameterError:
         raise MyException('invalid conf, check if missing some conf')
     try: 
@@ -1176,14 +1358,11 @@ def setup_agent(conf_db, agents_conf, ip):
 
         
 def main():
-
     try:
         opts, args = getopt.getopt(sys.argv[1:], 'd',['debug'])
         for opt, arg in opts:
             if opt in ('-d', '--debug'):
                 log.setLevel(logging.DEBUG)
-                DEBUG=True
-                
     except getopt.GetoptError:
         log.debug('invalid option, use default')
 
@@ -1199,6 +1378,7 @@ def main():
     registry_frontend_image='konradkleine/docker-registry-frontend:v2'
     rancher_agent_image='rancher/agent:v0.8.2'
     rancher_agent_instance='rancher/agent-instance:v0.6.0'
+    
     
 
     log.info("loading config from "+config_path)
@@ -1314,6 +1494,7 @@ def main():
                 rs = RancherServer(
                     registry_ip=conf_db['registry_ip'],
                     registry_port=conf_db['registry_port'], 
+                    registry_image=registry_image,
                     registry_password=conf_db['registry_password'], 
                     ip=conf_db['server_ip'], 
                     port=conf_db['server_port'],
@@ -1388,6 +1569,7 @@ def main():
                   password=conf_db['registry_frontend_password'],
                   registry_ip=conf_db['registry_ip'],
                   registry_port=conf_db['registry_port'],
+                  registry_image=registry_image,
                   registry_password=conf_db['registry_password'],
                   port=conf_db['registry_frontend_port'],
                   name=conf_db['registry_frontend_name'],
@@ -1468,13 +1650,23 @@ def main():
                 sys.exit(1)
 
             try:
+                default_id = get_default_environment_id(conf_db['server_ip'], conf_db['server_port'])
+                apikey = create_apikey(conf_db['server_ip'], conf_db['server_port'], default_id)
+                agent_command = create_registrationtoken(conf_db['server_ip'], conf_db['server_port'], default_id, apikey)
+                log.debug('agent command:%s'%agent_command)
+
+            except MyException, e:
+                log.error(e)
+                sys.exit(1)
+
+            try:
                 for ip in agents_conf.keys():
                     if ip == 'rancher-server-command':
                         log.debug('skip agent')
                         continue
                     log.info('----------------------------')
                     log.info('setup agent in \'%s\''% ip)
-                    setup_agent(conf_db, agents_conf, ip)
+                    setup_agent(conf_db, agents_conf, ip, agent_command, rancher_agent_image, rancher_agent_instance, registry_image,cloud_rancher_image)
             except MyException, e:
                 log.error('%s setup agent fail:%s, skip...'%(ip,e))
             except (KeyboardInterrupt, SystemExit), e:
