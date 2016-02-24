@@ -829,7 +829,7 @@ class RancherAgent(Container):
             raise MyException('can\'t get docker images')
         else:
             agent_image = 'docker.io/%s'%(self.image)
-            agent_instance_image = self.agent_instance_image
+            agent_instance_image = 'docker.io/%s'%self.agent_instance_image
             if self.local: 
                 dockerimages = result.stdout.strip().split('\n')
             else:
@@ -1371,15 +1371,62 @@ def main():
     zipped_path = script_dir_path+'/images_zipped.tar.gz'
     images_file = script_dir_path+'/imagelists'
 
+    registry_image=''
+    cloud_rancher_image=''
+    registry_frontend_image=''
+    rancher_agent_image=''
+    rancher_agent_instance=''
 
     # images
-    registry_image='registry:2'
-    cloud_rancher_image='cloudsoar/rancher:1.1'
-    registry_frontend_image='konradkleine/docker-registry-frontend:v2'
-    rancher_agent_image='rancher/agent:v0.8.2'
-    rancher_agent_instance='rancher/agent-instance:v0.6.0'
-    
-    
+    try:
+        f = open(images_file, 'r')
+        try:
+        #do some check, skip alrealy exist image
+            for eachline in f:
+                exist_flag = False
+                li = eachline.strip()
+                if li.startswith('#') or not li:
+                    continue
+
+                if li.startswith('docker.io/'): 
+                    li  = li.replace('docker.io/','')
+
+                if re.match(r'registry:',li):
+                    registry_image=li
+                    continue
+                if re.match(r'cloudsoar/rancher:', li):
+                    cloud_rancher_image=li
+                    continue
+                if re.match(r'konradkleine/docker-registry-frontend:', li):
+                    registry_frontend_image=li
+                    continue
+                if re.match(r'rancher/agent:', li):
+                    rancher_agent_image = li
+                    continue
+                if re.match(r'rancher/agent-instance:',li):
+                    rancher_agent_instance = li
+                    continue
+                
+        except Exception, e:
+            log.error(e)
+            logging.shutdown()
+            sys.exit(1)
+        finally:
+            f.close()
+    except Exception, e:
+        log.error(e)
+        logging.shutdown()
+        sys.exit(1)
+
+    if not registry_image or not cloud_rancher_image or not registry_frontend_image or not rancher_agent_image or not rancher_agent_instance:
+        log.debug('registry_image:%s'%(registry_image))
+        log.debug('cloud_rancher_image:%s'%(cloud_rancher_image))
+        log.debug('registry_frontend_limage:%s'%(registry_frontend_image))
+        log.debug('rancher_agent_image:%s'%(rancher_agent_image))
+        log.debug('rancher_agent_instance:%s'%(rancher_agent_instance))
+        log.error('imagelists miss some neccessary images')
+        logging.shutdown()
+        sys.exit(1)
 
     log.info("loading config from "+config_path)
 
